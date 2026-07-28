@@ -2,6 +2,7 @@
 
 import json
 import logging
+import os
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -198,6 +199,8 @@ def run_files(
     services: PipelineServices,
     output_dir: Path,
     context: ExecutionContext | None = None,
+    *,
+    source_root: Path | None = None,
 ) -> RunResult:
     """Process files serially while sharing one ASR worker session."""
 
@@ -241,7 +244,7 @@ def run_files(
                         options,
                         services,
                         workspace,
-                        output_dir,
+                        _output_dir_for(input_path, output_dir, source_root),
                         selected_context,
                         len(input_paths),
                     )
@@ -321,6 +324,8 @@ def transcribe_files(
     services: PipelineServices,
     output_dir: Path,
     context: ExecutionContext | None = None,
+    *,
+    source_root: Path | None = None,
 ) -> TranscriptionRunResult:
     """Prepare and transcribe files serially into Transcript JSON artifacts."""
 
@@ -366,7 +371,9 @@ def transcribe_files(
                     selected_context,
                     len(input_paths),
                 )
-                output_path = output_dir / f"{input_path.stem}.transcript.json"
+                file_output_dir = _output_dir_for(input_path, output_dir, source_root)
+                file_output_dir.mkdir(parents=True, exist_ok=True)
+                output_path = file_output_dir / f"{input_path.stem}.transcript.json"
                 _write_transcript(output_path, transcript)
                 successes.append(
                     TranscriptionResult(
@@ -446,21 +453,61 @@ def transcribe_files(
     )
 
 
-def discover_inputs(input_path: Path, provider: str = "fake") -> tuple[Path, ...]:
-    """Resolve one input or supported direct children of an input directory."""
+def discover_inputs(
+    input_path: Path,
+    provider: str = "fake",
+    context: ExecutionContext | None = None,
+) -> tuple[Path, ...]:
+    """Resolve one input or supported recursive children of an input directory."""
 
+    selected_context = execution_context(context)
+    selected_context.checkpoint()
     if input_path.is_file():
         return (input_path,)
     if input_path.is_dir():
         suffixes = {".json"} if provider == "fake" else _MEDIA_SUFFIXES
-        inputs = tuple(
-            sorted(
-                path for path in input_path.iterdir() if path.suffix.lower() in suffixes
+        scan_errors: list[OSError] = []
+        inputs: list[Path] = []
+        for root, _directories, filenames in os.walk(
+            input_path,
+            followlinks=False,
+            onerror=scan_errors.append,
+        ):
+            selected_context.checkpoint()
+            inputs.extend(
+                Path(root) / name
+                for name in filenames
+                if Path(name).suffix.lower() in suffixes
+            )
+        if scan_errors:
+            raise ConfigurationError(
+                f"could not scan input directory {input_path}: {scan_errors[0]}"
+            )
+        inputs.sort(
+            key=lambda path: (
+                path.relative_to(input_path).as_posix().casefold(),
+                path.relative_to(input_path).as_posix(),
             )
         )
         if inputs:
-            return inputs
+            return tuple(inputs)
     raise ConfigurationError(f"no supported inputs found at {input_path}")
+
+
+def _output_dir_for(
+    input_path: Path,
+    output_dir: Path,
+    source_root: Path | None,
+) -> Path:
+    if source_root is None:
+        return output_dir
+    try:
+        relative_parent = input_path.parent.relative_to(source_root)
+    except ValueError as exc:
+        raise ConfigurationError(
+            f"input {input_path} is outside source root {source_root}"
+        ) from exc
+    return output_dir / relative_parent
 
 
 def _process_one(

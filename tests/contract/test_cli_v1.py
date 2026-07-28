@@ -30,6 +30,36 @@ def test_run_dry_run_is_versioned_and_has_no_side_effects(
     assert not output.exists()
 
 
+def test_directory_dry_run_lists_recursive_inputs(
+    tmp_path: Path, capsys: CaptureFixture[str]
+) -> None:
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    first = tmp_path / "first.json"
+    second = nested / "second.json"
+    first.write_text("{}", encoding="utf-8")
+    second.write_text("{}", encoding="utf-8")
+
+    assert (
+        main(
+            (
+                "run",
+                str(tmp_path),
+                "--asr-profile",
+                "fake",
+                "--output-dir",
+                str(tmp_path / "out"),
+                "--dry-run",
+            )
+        )
+        == 0
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["input_root"] == str(tmp_path)
+    assert payload["inputs"] == [str(first), str(second)]
+
+
 def test_config_show_masks_secret(tmp_path: Path, capsys: CaptureFixture[str]) -> None:
     config = tmp_path / "config.toml"
     config.write_text(

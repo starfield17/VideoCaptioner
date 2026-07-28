@@ -56,6 +56,9 @@ def run(
                 "dry_run": True,
                 "provider": plan.provider,
                 "inputs": [str(path) for path in plan.inputs],
+                "input_root": (
+                    str(plan.input_root) if plan.input_root is not None else None
+                ),
                 "output_dir": str(plan.output_dir),
                 "output_formats": plan.output_formats,
             },

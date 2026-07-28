@@ -7,6 +7,7 @@ from typing import Literal
 from PySide6.QtCore import QObject, Signal, Slot
 
 from captioner.workflow.api import (
+    ApplicationCommand,
     AsrProfile,
     CancellationToken,
     ExecutionContext,
@@ -17,9 +18,10 @@ from captioner.workflow.api import (
     execute_refine,
     execute_run,
     execute_transcribe,
+    plan_operation,
 )
 
-JobKind = Literal["run", "transcribe", "refine", "doctor", "download"]
+JobKind = Literal["scan", "run", "transcribe", "refine", "doctor", "download"]
 
 
 @dataclass(frozen=True)
@@ -34,6 +36,7 @@ class JobSpec:
     profile: AsrProfile | None = None
     load_model: bool = False
     model_key: str | None = None
+    scan_command: ApplicationCommand = "run"
 
 
 class OperationWorker(QObject):
@@ -76,6 +79,17 @@ class OperationWorker(QObject):
             if spec.model_key is None:
                 raise ValueError("download job requires model_key")
             return download_model(spec.options, spec.model_key, context=context)
+        if spec.kind == "scan":
+            if spec.input_path is None or spec.output_dir is None:
+                raise ValueError("scan job requires input and output")
+            context.checkpoint()
+            return plan_operation(
+                spec.scan_command,
+                spec.input_path,
+                spec.output_dir,
+                spec.options,
+                context,
+            )
         if spec.input_path is None or spec.output_dir is None:
             raise ValueError(f"{spec.kind} job requires input and output")
         if spec.kind == "transcribe":

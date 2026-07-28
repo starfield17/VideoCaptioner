@@ -42,10 +42,11 @@ conda env create -f conda/gui.yml
 conda run -n captioner-gui captioner-gui
 ```
 
-The GUI provides full-pipeline, transcribe-only, and existing-subtitle refine
-runs; shared settings; model inspection/downloads; Doctor diagnostics; progress
-and cooperative cancellation. It uses the same Workflow/Application API and
-configuration as the CLI. See [GUI usage and testing](docs/gui.md).
+The English-first GUI provides full-pipeline, transcribe-only, and
+existing-subtitle refine runs; recursive file/folder drag-and-drop; Light and
+Dark themes; shared settings; model inspection/downloads; Doctor diagnostics;
+progress and cooperative cancellation. It uses the same Workflow/Application
+API and configuration as the CLI. See [GUI usage and testing](docs/gui.md).
 
 The fake input format is documented by `tests/fixtures/fake_input.json`. The
 Qwen3 environment and its Python 3.13 Doctor checks are documented in

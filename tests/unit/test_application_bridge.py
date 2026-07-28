@@ -1,4 +1,5 @@
 import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -11,6 +12,7 @@ from captioner.workflow.api import (
     ProgressEvent,
     ProgressKind,
     build_fake_services,
+    execute_run,
     load_options,
     plan_operation,
     render_options_toml,
@@ -62,7 +64,48 @@ def test_plan_operation_has_no_output_side_effect(tmp_path: Path) -> None:
     )
 
     assert plan.inputs == (fixture,)
+    assert plan.input_root is None
     assert not output.exists()
+
+
+def test_directory_plan_exposes_recursive_input_root(tmp_path: Path) -> None:
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    fixture = nested / "fixture.json"
+    fixture.write_text("{}", encoding="utf-8")
+
+    plan = plan_operation(
+        "run",
+        tmp_path,
+        tmp_path / "output",
+        PipelineOptions.model_validate({"asr": {"provider": "fake"}}),
+    )
+
+    assert plan.inputs == (fixture,)
+    assert plan.input_root == tmp_path
+
+
+def test_execute_run_preserves_recursive_output_structure(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    first_dir = source / "first"
+    second_dir = source / "second"
+    first_dir.mkdir(parents=True)
+    second_dir.mkdir()
+    fixture = Path("tests/fixtures/fake_input.json")
+    shutil.copyfile(fixture, first_dir / "episode.json")
+    shutil.copyfile(fixture, second_dir / "episode.json")
+    options = PipelineOptions.model_validate(
+        {
+            "asr": {"provider": "fake"},
+            "logging": {"file": False, "console": False},
+        }
+    )
+
+    result = execute_run(source, options, tmp_path / "output")
+
+    assert not result.failed
+    assert (tmp_path / "output/first/episode.srt").is_file()
+    assert (tmp_path / "output/second/episode.srt").is_file()
 
 
 def test_cancellation_retains_workdir_and_emits_cancelled(tmp_path: Path) -> None:

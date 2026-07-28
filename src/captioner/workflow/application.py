@@ -45,6 +45,7 @@ ApplicationCommand = Literal["run", "transcribe", "refine"]
 class ApplicationPlan:
     command: ApplicationCommand
     inputs: tuple[Path, ...]
+    input_root: Path | None
     output_dir: Path
     provider: str
     output_formats: tuple[str, ...]
@@ -85,6 +86,7 @@ def plan_operation(
     input_path: Path,
     output_dir: Path,
     options: PipelineOptions,
+    context: ExecutionContext | None = None,
 ) -> ApplicationPlan:
     """Validate an operation without downloads, API calls, or filesystem writes."""
 
@@ -96,10 +98,15 @@ def plan_operation(
             raise ConfigurationError("refine accepts an SRT or subtitle JSON file")
         inputs = (input_path,)
     else:
-        inputs = discover_inputs(input_path, provider=options.asr.provider)
+        inputs = discover_inputs(
+            input_path,
+            provider=options.asr.provider,
+            context=context,
+        )
     return ApplicationPlan(
         command=command,
         inputs=inputs,
+        input_root=input_path if input_path.is_dir() else None,
         output_dir=output_dir,
         provider=options.asr.provider,
         output_formats=tuple(item.value for item in options.output.formats),
@@ -125,6 +132,7 @@ def execute_run(
         build_services(prepared, selected),
         output_dir,
         selected,
+        source_root=input_path if input_path.is_dir() else None,
     )
 
 
@@ -147,6 +155,7 @@ def execute_transcribe(
         build_services(prepared, selected),
         output_dir,
         selected,
+        source_root=input_path if input_path.is_dir() else None,
     )
 
 

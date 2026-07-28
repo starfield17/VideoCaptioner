@@ -44,6 +44,21 @@ def test_directory_discovery_accepts_media_and_sorts_inputs(tmp_path: Path) -> N
     )
 
 
+def test_directory_discovery_is_recursive_and_deterministic(tmp_path: Path) -> None:
+    nested = tmp_path / "Season 2"
+    nested.mkdir()
+    first = nested / "A.mp4"
+    second = tmp_path / "z.mp4"
+    ignored = nested / "notes.txt"
+    for path in (first, second, ignored):
+        path.write_bytes(b"")
+
+    assert discover_inputs(tmp_path, provider="faster-whisper") == (
+        first,
+        second,
+    )
+
+
 def test_transcribe_files_writes_transcript_json(tmp_path: Path) -> None:
     input_path = ROOT / "tests/fixtures/fake_input.json"
     options = PipelineOptions(run=RunOptions(keep_workdir=True))
@@ -63,6 +78,39 @@ def test_transcribe_files_writes_transcript_json(tmp_path: Path) -> None:
     assert payload["schema_version"] == "transcript.v1"
     assert payload["timing_origin"] == "asr_native"
     assert payload["words"]
+
+
+def test_recursive_inputs_preserve_relative_output_directories(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source"
+    first_dir = source / "first"
+    second_dir = source / "second"
+    first_dir.mkdir(parents=True)
+    second_dir.mkdir()
+    fixture = ROOT / "tests/fixtures/fake_input.json"
+    first = first_dir / "episode.json"
+    second = second_dir / "episode.json"
+    shutil.copyfile(fixture, first)
+    shutil.copyfile(fixture, second)
+    options = PipelineOptions(run=RunOptions(keep_workdir=True))
+    services = PipelineServices(
+        media=FakeMediaService(),
+        transcription=FakeTranscriptionService(),
+        subtitles=SubtitleService(FakeLlm()),
+    )
+
+    result = run_files(
+        discover_inputs(source),
+        options,
+        services,
+        tmp_path / "out",
+        source_root=source,
+    )
+
+    assert not result.failed
+    assert (tmp_path / "out/first/episode.srt").is_file()
+    assert (tmp_path / "out/second/episode.srt").is_file()
 
 
 def test_serial_run_loads_once_and_continues_after_one_file_failure(

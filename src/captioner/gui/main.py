@@ -9,7 +9,6 @@ from PySide6.QtGui import QFont, QFontDatabase
 from PySide6.QtWidgets import QApplication
 
 from captioner.gui.main_window import MainWindow
-from captioner.gui.styles import APP_STYLE
 
 
 def select_ui_font() -> QFont:
@@ -37,7 +36,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         application = QApplication(list(argv) if argv is not None else sys.argv)
     application.setApplicationName("VideoCaptioner")
     application.setOrganizationName("VideoCaptioner")
-    application.setStyleSheet(APP_STYLE)
     application.setFont(select_ui_font())
     window = MainWindow(application)
     window.show()
