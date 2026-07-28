@@ -35,6 +35,18 @@ conda run -n captioner-core python -m captioner doctor
 conda run -n captioner-core python -m captioner run tests/fixtures/fake_input.json --asr-profile fake --output-dir ./out
 ```
 
+For the bilingual desktop console:
+
+```bash
+conda env create -f conda/gui.yml
+conda run -n captioner-gui captioner-gui
+```
+
+The GUI provides full-pipeline, transcribe-only, and existing-subtitle refine
+runs; shared settings; model inspection/downloads; Doctor diagnostics; progress
+and cooperative cancellation. It uses the same Workflow/Application API and
+configuration as the CLI. See [GUI usage and testing](docs/gui.md).
+
 The fake input format is documented by `tests/fixtures/fake_input.json`. The
 Qwen3 environment and its Python 3.13 Doctor checks are documented in
 `docs/qwen3-python313-compatibility.md`.

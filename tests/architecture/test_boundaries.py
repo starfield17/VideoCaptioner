@@ -104,6 +104,17 @@ def test_import_direction_is_explicit() -> None:
             violations.extend(
                 f"{path}: {name}" for name in imports if name.startswith(forbidden)
             )
+        elif path.is_relative_to(SOURCE_ROOT / "captioner/gui"):
+            allowed_captioner = (
+                "captioner.gui",
+                "captioner.workflow.api",
+            )
+            violations.extend(
+                f"{path}: {name}"
+                for name in imports
+                if name.startswith("captioner.")
+                and not name.startswith(allowed_captioner)
+            )
         elif path.is_relative_to(SOURCE_ROOT / "captioner/cli"):
             forbidden = (
                 "captioner.media",

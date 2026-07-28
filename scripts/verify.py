@@ -20,6 +20,7 @@ def main() -> int:
         [sys.executable, "-m", "pytest", "tests/integration"],
         [sys.executable, "-m", "pytest", "tests/architecture"],
         [sys.executable, "-m", "pytest", "tests/golden"],
+        [sys.executable, "-m", "pytest", "tests/gui"],
     )
     for command in commands:
         _run(command)
