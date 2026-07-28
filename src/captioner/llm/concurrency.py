@@ -4,6 +4,8 @@ from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 
+from captioner.shared.errors import OperationCancelled
+
 
 @dataclass(frozen=True)
 class BatchResult[RequestT, ResultT]:
@@ -24,9 +26,15 @@ class ParallelLlmExecutor:
 
     MAX_WORKERS = 100
 
-    def __init__(self, max_workers: int = 1) -> None:
+    def __init__(
+        self,
+        max_workers: int = 1,
+        *,
+        cancellation_check: Callable[[], None] | None = None,
+    ) -> None:
         self._validate_workers(max_workers)
         self._max_workers = max_workers
+        self._cancellation_check = cancellation_check
 
     def map[RequestT, ResultT](
         self,
@@ -41,6 +49,7 @@ class ParallelLlmExecutor:
         ordered_requests = tuple(requests)
         if not ordered_requests:
             return ()
+        self._checkpoint()
         actual_workers = min(
             configured_workers,
             len(ordered_requests),
@@ -59,7 +68,12 @@ class ParallelLlmExecutor:
                 for index, request in enumerate(ordered_requests)
             }
             for future in as_completed(futures):
-                results.append(future.result())
+                try:
+                    results.append(future.result())
+                except OperationCancelled:
+                    for pending in futures:
+                        pending.cancel()
+                    raise
         return tuple(sorted(results, key=lambda result: result.index))
 
     @classmethod
@@ -67,20 +81,27 @@ class ParallelLlmExecutor:
         if isinstance(max_workers, bool) or not 1 <= max_workers <= cls.MAX_WORKERS:
             raise ValueError("LLM parallelism must be between 1 and 100")
 
-    @staticmethod
     def _run_one[RequestT, ResultT](
+        self,
         index: int,
         request: RequestT,
         operation: Callable[[RequestT], ResultT],
     ) -> BatchResult[RequestT, ResultT]:
         try:
+            self._checkpoint()
             return BatchResult(
                 index=index,
                 request=request,
                 value=operation(request),
             )
+        except OperationCancelled:
+            raise
         except Exception as exc:
             return BatchResult(index=index, request=request, error=exc)
+
+    def _checkpoint(self) -> None:
+        if self._cancellation_check is not None:
+            self._cancellation_check()
 
 
 __all__ = ["BatchResult", "ParallelLlmExecutor"]

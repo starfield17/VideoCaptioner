@@ -6,6 +6,7 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 
+from captioner.llm.api import ParallelLlmExecutor
 from captioner.llm.fake import FakeLlm
 from captioner.llm.openai_adapter import OpenAICompatibleLlm
 from captioner.media.api import FakeMediaService, FfmpegMediaService, MediaService
@@ -17,6 +18,7 @@ from captioner.media.voice_separation import (
 from captioner.shared.errors import (
     CaptionerError,
     ConfigurationError,
+    OperationCancelled,
     ProviderUnavailableError,
     SubtitleValidationError,
 )
@@ -50,6 +52,13 @@ from captioner.workflow.options import (
     PipelineOptions,
     Qwen3AsrOptions,
 )
+from captioner.workflow.progress import (
+    ExecutionContext,
+    ProgressEvent,
+    ProgressKind,
+    ProgressStage,
+    execution_context,
+)
 from captioner.workflow.workspace import RunWorkspace
 
 
@@ -63,7 +72,10 @@ class PipelineServices:
     voice_separator: VoiceSeparator | None = None
 
 
-def build_subtitle_service(options: PipelineOptions) -> SubtitleService:
+def build_subtitle_service(
+    options: PipelineOptions,
+    context: ExecutionContext | None = None,
+) -> SubtitleService:
     """Build the subtitle service without starting media or ASR."""
 
     llm = (
@@ -71,10 +83,20 @@ def build_subtitle_service(options: PipelineOptions) -> SubtitleService:
         if options.llm.provider == "openai-compatible"
         else FakeLlm()
     )
-    return SubtitleService(llm, glossary=options.glossary)
+    selected_context = execution_context(context)
+    return SubtitleService(
+        llm,
+        executor=ParallelLlmExecutor(
+            cancellation_check=selected_context.checkpoint,
+        ),
+        glossary=options.glossary,
+    )
 
 
-def build_fake_services(options: PipelineOptions) -> PipelineServices:
+def build_fake_services(
+    options: PipelineOptions,
+    context: ExecutionContext | None = None,
+) -> PipelineServices:
     """Build an all-local deterministic composition for tests and demos."""
 
     return PipelineServices(
@@ -83,7 +105,7 @@ def build_fake_services(options: PipelineOptions) -> PipelineServices:
             channels=options.audio.channels,
         ),
         transcription=FakeTranscriptionService(),
-        subtitles=build_subtitle_service(options),
+        subtitles=build_subtitle_service(options, context),
         voice_separator=(
             CommandVoiceSeparator(
                 command_env=options.audio.voice_separation.command_env
@@ -94,7 +116,10 @@ def build_fake_services(options: PipelineOptions) -> PipelineServices:
     )
 
 
-def build_services(options: PipelineOptions) -> PipelineServices:
+def build_services(
+    options: PipelineOptions,
+    context: ExecutionContext | None = None,
+) -> PipelineServices:
     """Compose services for the selected static ASR provider."""
 
     voice_separator = (
@@ -102,7 +127,7 @@ def build_services(options: PipelineOptions) -> PipelineServices:
         if options.audio.voice_separation.enabled
         else None
     )
-    subtitles = build_subtitle_service(options)
+    subtitles = build_subtitle_service(options, context)
 
     if isinstance(options.asr, FasterWhisperAsrOptions):
         return PipelineServices(
@@ -153,10 +178,11 @@ def process_media(
     options: PipelineOptions,
     services: PipelineServices,
     output_dir: Path,
+    context: ExecutionContext | None = None,
 ) -> ProcessingResult:
     """Process one input with an isolated temporary workspace."""
 
-    result = run_files((input_path,), options, services, output_dir)
+    result = run_files((input_path,), options, services, output_dir, context)
     if result.failed:
         failure = result.failed[0]
         workdir = result.workdir or "unavailable"
@@ -171,22 +197,42 @@ def run_files(
     options: PipelineOptions,
     services: PipelineServices,
     output_dir: Path,
+    context: ExecutionContext | None = None,
 ) -> RunResult:
     """Process files serially while sharing one ASR worker session."""
 
+    selected_context = execution_context(context)
+    selected_context.checkpoint()
     options = PipelineOptions.validate_for_phase0(options)
     if not input_paths:
         raise ConfigurationError("at least one input file is required")
     output_dir.mkdir(parents=True, exist_ok=True)
     workspace = RunWorkspace(keep=options.run.keep_workdir)
     workspace.write_run_metadata(input_paths, options)
+    selected_context.emit(
+        ProgressEvent(
+            ProgressKind.RUN_STARTED,
+            file_count=len(input_paths),
+        )
+    )
     successes: list[ProcessingResult] = []
     failures: list[FileFailure] = []
     started = False
     try:
+        _stage_started(selected_context, ProgressStage.PROVIDER)
         services.transcription.start()
         started = True
+        _stage_completed(selected_context, ProgressStage.PROVIDER)
         for index, input_path in enumerate(input_paths, start=1):
+            selected_context.checkpoint()
+            selected_context.emit(
+                ProgressEvent(
+                    ProgressKind.FILE_STARTED,
+                    input_path=input_path,
+                    file_index=index,
+                    file_count=len(input_paths),
+                )
+            )
             try:
                 successes.append(
                     _process_one(
@@ -196,9 +242,30 @@ def run_files(
                         services,
                         workspace,
                         output_dir,
+                        selected_context,
+                        len(input_paths),
                     )
                 )
+                selected_context.emit(
+                    ProgressEvent(
+                        ProgressKind.FILE_COMPLETED,
+                        input_path=input_path,
+                        file_index=index,
+                        file_count=len(input_paths),
+                    )
+                )
+            except OperationCancelled:
+                raise
             except Exception as exc:
+                selected_context.emit(
+                    ProgressEvent(
+                        ProgressKind.FILE_FAILED,
+                        input_path=input_path,
+                        file_index=index,
+                        file_count=len(input_paths),
+                        message=str(exc),
+                    )
+                )
                 logging.getLogger("captioner.pipeline").error(
                     "file processing failed",
                     extra=log_extra(
@@ -217,6 +284,11 @@ def run_files(
                 )
                 if not options.run.continue_on_error:
                     break
+    except OperationCancelled as exc:
+        selected_context.emit(ProgressEvent(ProgressKind.CANCELLED))
+        raise OperationCancelled(
+            f"{exc}; workdir retained at {workspace.root}"
+        ) from exc
     except CaptionerError as exc:
         raise ProviderUnavailableError(
             f"{exc}; workdir retained at {workspace.root}"
@@ -230,6 +302,12 @@ def run_files(
         workspace.cleanup()
         retained_workdir = None
         successes = [replace(result, workdir=None) for result in successes]
+    selected_context.emit(
+        ProgressEvent(
+            ProgressKind.RUN_COMPLETED,
+            file_count=len(input_paths),
+        )
+    )
     return RunResult(
         succeeded=tuple(successes),
         failed=tuple(failures),
@@ -242,22 +320,42 @@ def transcribe_files(
     options: PipelineOptions,
     services: PipelineServices,
     output_dir: Path,
+    context: ExecutionContext | None = None,
 ) -> TranscriptionRunResult:
     """Prepare and transcribe files serially into Transcript JSON artifacts."""
 
+    selected_context = execution_context(context)
+    selected_context.checkpoint()
     options = PipelineOptions.validate_for_phase0(options)
     if not input_paths:
         raise ConfigurationError("at least one input file is required")
     output_dir.mkdir(parents=True, exist_ok=True)
     workspace = RunWorkspace(keep=options.run.keep_workdir)
     workspace.write_run_metadata(input_paths, options)
+    selected_context.emit(
+        ProgressEvent(
+            ProgressKind.RUN_STARTED,
+            file_count=len(input_paths),
+        )
+    )
     successes: list[TranscriptionResult] = []
     failures: list[FileFailure] = []
     started = False
     try:
+        _stage_started(selected_context, ProgressStage.PROVIDER)
         services.transcription.start()
         started = True
+        _stage_completed(selected_context, ProgressStage.PROVIDER)
         for index, input_path in enumerate(input_paths, start=1):
+            selected_context.checkpoint()
+            selected_context.emit(
+                ProgressEvent(
+                    ProgressKind.FILE_STARTED,
+                    input_path=input_path,
+                    file_index=index,
+                    file_count=len(input_paths),
+                )
+            )
             try:
                 _, transcript, warnings = _transcribe_input(
                     input_path,
@@ -265,6 +363,8 @@ def transcribe_files(
                     options,
                     services,
                     workspace,
+                    selected_context,
+                    len(input_paths),
                 )
                 output_path = output_dir / f"{input_path.stem}.transcript.json"
                 _write_transcript(output_path, transcript)
@@ -277,7 +377,26 @@ def transcribe_files(
                         warnings=warnings,
                     )
                 )
+                selected_context.emit(
+                    ProgressEvent(
+                        ProgressKind.FILE_COMPLETED,
+                        input_path=input_path,
+                        file_index=index,
+                        file_count=len(input_paths),
+                    )
+                )
+            except OperationCancelled:
+                raise
             except Exception as exc:
+                selected_context.emit(
+                    ProgressEvent(
+                        ProgressKind.FILE_FAILED,
+                        input_path=input_path,
+                        file_index=index,
+                        file_count=len(input_paths),
+                        message=str(exc),
+                    )
+                )
                 logging.getLogger("captioner.pipeline").error(
                     "file transcription failed",
                     extra=log_extra(
@@ -296,6 +415,11 @@ def transcribe_files(
                 )
                 if not options.run.continue_on_error:
                     break
+    except OperationCancelled as exc:
+        selected_context.emit(ProgressEvent(ProgressKind.CANCELLED))
+        raise OperationCancelled(
+            f"{exc}; workdir retained at {workspace.root}"
+        ) from exc
     except CaptionerError as exc:
         raise ProviderUnavailableError(
             f"{exc}; workdir retained at {workspace.root}"
@@ -309,6 +433,12 @@ def transcribe_files(
         workspace.cleanup()
         retained_workdir = None
         successes = [replace(result, workdir=None) for result in successes]
+    selected_context.emit(
+        ProgressEvent(
+            ProgressKind.RUN_COMPLETED,
+            file_count=len(input_paths),
+        )
+    )
     return TranscriptionRunResult(
         succeeded=tuple(successes),
         failed=tuple(failures),
@@ -340,6 +470,8 @@ def _process_one(
     services: PipelineServices,
     workspace: RunWorkspace,
     output_dir: Path,
+    execution: ExecutionContext,
+    file_count: int,
 ) -> ProcessingResult:
     file_dir, transcript, warnings = _transcribe_input(
         input_path,
@@ -347,6 +479,8 @@ def _process_one(
         options,
         services,
         workspace,
+        execution,
+        file_count,
     )
     mutable_warnings = list(warnings)
     context: ContentContext | None = None
@@ -355,6 +489,13 @@ def _process_one(
         or options.correction.enabled
         or options.translation.enabled
     ):
+        _stage_started(
+            execution,
+            ProgressStage.CONTEXT_ANALYSIS,
+            input_path,
+            index,
+            file_count,
+        )
         context_text = transcript.text
         if len(context_text) > options.context_analysis.max_characters:
             context_text = context_text[: options.context_analysis.max_characters]
@@ -369,6 +510,20 @@ def _process_one(
             context.model_dump_json(indent=2),
         )
         _log_event(file_dir, "context_analysis", "completed")
+        _stage_completed(
+            execution,
+            ProgressStage.CONTEXT_ANALYSIS,
+            input_path,
+            index,
+            file_count,
+        )
+    _stage_started(
+        execution,
+        ProgressStage.SEGMENTATION,
+        input_path,
+        index,
+        file_count,
+    )
     subtitle = services.subtitles.segment(
         transcript,
         context=context,
@@ -385,8 +540,22 @@ def _process_one(
     )
     _write_document(file_dir / "subtitle.segmented.json", subtitle)
     _log_event(file_dir, "segmentation", "completed")
+    _stage_completed(
+        execution,
+        ProgressStage.SEGMENTATION,
+        input_path,
+        index,
+        file_count,
+    )
 
     if options.correction.enabled:
+        _stage_started(
+            execution,
+            ProgressStage.CORRECTION,
+            input_path,
+            index,
+            file_count,
+        )
         subtitle = services.subtitles.correct(
             subtitle,
             context=context,
@@ -396,8 +565,22 @@ def _process_one(
         )
         _write_document(file_dir / "subtitle.corrected.json", subtitle)
         _log_event(file_dir, "correction", "completed")
+        _stage_completed(
+            execution,
+            ProgressStage.CORRECTION,
+            input_path,
+            index,
+            file_count,
+        )
 
     if options.cleanup.enabled:
+        _stage_started(
+            execution,
+            ProgressStage.CLEANUP,
+            input_path,
+            index,
+            file_count,
+        )
         subtitle = services.subtitles.cleanup(
             subtitle,
             fillers=options.cleanup.fillers,
@@ -406,8 +589,22 @@ def _process_one(
         )
         _write_document(file_dir / "subtitle.cleaned.json", subtitle)
         _log_event(file_dir, "cleanup", "completed")
+        _stage_completed(
+            execution,
+            ProgressStage.CLEANUP,
+            input_path,
+            index,
+            file_count,
+        )
 
     if options.translation.enabled:
+        _stage_started(
+            execution,
+            ProgressStage.TRANSLATION,
+            input_path,
+            index,
+            file_count,
+        )
         subtitle = services.subtitles.translate(
             subtitle,
             target_language=options.translation.target_language,
@@ -418,13 +615,41 @@ def _process_one(
         )
         _write_document(file_dir / "subtitle.translated.json", subtitle)
         _log_event(file_dir, "translation", "completed")
+        _stage_completed(
+            execution,
+            ProgressStage.TRANSLATION,
+            input_path,
+            index,
+            file_count,
+        )
 
+    _stage_started(
+        execution,
+        ProgressStage.QUALITY,
+        input_path,
+        index,
+        file_count,
+    )
     quality_report = services.subtitles.check_quality(
         subtitle, options=options.subtitle
     )
     _write_quality(file_dir / "quality.json", quality_report)
     _log_event(file_dir, "quality", "completed")
+    _stage_completed(
+        execution,
+        ProgressStage.QUALITY,
+        input_path,
+        index,
+        file_count,
+    )
     if options.repair.enabled and quality_report.has_repairable_issues:
+        _stage_started(
+            execution,
+            ProgressStage.REPAIR,
+            input_path,
+            index,
+            file_count,
+        )
         subtitle = services.subtitles.repair(
             subtitle,
             quality_report,
@@ -438,6 +663,13 @@ def _process_one(
         )
         _write_quality(file_dir / "quality.json", quality_report)
         _log_event(file_dir, "repair", "completed")
+        _stage_completed(
+            execution,
+            ProgressStage.REPAIR,
+            input_path,
+            index,
+            file_count,
+        )
     if (
         options.translation.enabled
         and not options.translation.allow_partial
@@ -447,6 +679,13 @@ def _process_one(
             "translation remains incomplete after repair and partial output is disabled"
         )
     formats = tuple(output_format.value for output_format in options.output.formats)
+    _stage_started(
+        execution,
+        ProgressStage.EXPORT,
+        input_path,
+        index,
+        file_count,
+    )
     output_paths = services.subtitles.export(
         subtitle,
         output_dir=output_dir,
@@ -457,6 +696,13 @@ def _process_one(
         overwrite=options.output.overwrite == "replace",
     )
     _log_event(file_dir, "export", "completed")
+    _stage_completed(
+        execution,
+        ProgressStage.EXPORT,
+        input_path,
+        index,
+        file_count,
+    )
     return ProcessingResult(
         input_path=input_path,
         subtitle=subtitle,
@@ -473,10 +719,26 @@ def _transcribe_input(
     options: PipelineOptions,
     services: PipelineServices,
     workspace: RunWorkspace,
+    context: ExecutionContext,
+    file_count: int,
 ) -> tuple[Path, TranscriptDocument, tuple[str, ...]]:
     file_dir = workspace.file_dir(index, input_path)
+    _stage_started(
+        context,
+        ProgressStage.MEDIA,
+        input_path,
+        index,
+        file_count,
+    )
     audio = services.media.prepare_audio(input_path, file_dir)
     _log_event(file_dir, "media", "completed")
+    _stage_completed(
+        context,
+        ProgressStage.MEDIA,
+        input_path,
+        index,
+        file_count,
+    )
     warnings: list[str] = []
     if options.audio.voice_separation.enabled:
         separator = services.voice_separator
@@ -487,8 +749,22 @@ def _transcribe_input(
             warnings.append(f"voice_separation_fallback:{type(error).__name__}")
         else:
             try:
+                _stage_started(
+                    context,
+                    ProgressStage.VOICE_SEPARATION,
+                    input_path,
+                    index,
+                    file_count,
+                )
                 audio = separator.separate(audio, file_dir / "vocals.wav")
                 _log_event(file_dir, "voice_separation", "completed")
+                _stage_completed(
+                    context,
+                    ProgressStage.VOICE_SEPARATION,
+                    input_path,
+                    index,
+                    file_count,
+                )
             except VoiceSeparationError as exc:
                 if options.audio.voice_separation.required:
                     raise
@@ -499,8 +775,22 @@ def _transcribe_input(
         initial_prompt=options.asr.initial_prompt or None,
         timestamps=options.asr.timestamps,
     )
+    _stage_started(
+        context,
+        ProgressStage.TRANSCRIPTION,
+        input_path,
+        index,
+        file_count,
+    )
     transcript = services.transcription.transcribe(request, file_dir)
     _log_event(file_dir, "transcription", "completed")
+    _stage_completed(
+        context,
+        ProgressStage.TRANSCRIPTION,
+        input_path,
+        index,
+        file_count,
+    )
     return (file_dir, transcript, tuple(warnings))
 
 
@@ -538,6 +828,44 @@ def _log_event(file_dir: Path, stage: str, status: str) -> None:
     }
     with (file_dir / "processing.log").open("a", encoding="utf-8") as log_file:
         log_file.write(json.dumps(event, ensure_ascii=False) + "\n")
+
+
+def _stage_started(
+    context: ExecutionContext,
+    stage: ProgressStage,
+    input_path: Path | None = None,
+    file_index: int | None = None,
+    file_count: int | None = None,
+) -> None:
+    context.checkpoint()
+    context.emit(
+        ProgressEvent(
+            ProgressKind.STAGE_STARTED,
+            stage=stage,
+            input_path=input_path,
+            file_index=file_index,
+            file_count=file_count,
+        )
+    )
+
+
+def _stage_completed(
+    context: ExecutionContext,
+    stage: ProgressStage,
+    input_path: Path | None = None,
+    file_index: int | None = None,
+    file_count: int | None = None,
+) -> None:
+    context.checkpoint()
+    context.emit(
+        ProgressEvent(
+            ProgressKind.STAGE_COMPLETED,
+            stage=stage,
+            input_path=input_path,
+            file_index=file_index,
+            file_count=file_count,
+        )
+    )
 
 
 _MEDIA_SUFFIXES = {

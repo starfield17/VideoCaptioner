@@ -5,6 +5,10 @@ class CaptionerError(Exception):
     """Base class for expected application failures."""
 
 
+class OperationCancelled(CaptionerError):
+    """The user requested cooperative cancellation."""
+
+
 class ConfigurationError(CaptionerError):
     """Configuration or explicit input validation failed."""
 

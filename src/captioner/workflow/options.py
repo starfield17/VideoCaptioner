@@ -5,6 +5,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Literal, Self, cast
 
+import tomli_w
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -122,6 +123,18 @@ type AsrProfile = Literal[
     "nemo-parakeet-v3",
     "nemo-parakeet-110m-en",
 ]
+
+ASR_PROFILES: tuple[AsrProfile, ...] = (
+    "fake",
+    "faster-whisper-turbo",
+    "faster-whisper-small",
+    "faster-whisper-large-v2",
+    "faster-whisper-large-v3",
+    "qwen3-0.6b",
+    "qwen3-1.7b",
+    "nemo-parakeet-v3",
+    "nemo-parakeet-110m-en",
+)
 
 
 class ModelStoreOptions(BaseModel):
@@ -266,6 +279,57 @@ def load_options(config_path: Path | None = None) -> PipelineOptions:
     except (OSError, tomllib.TOMLDecodeError, ValidationError) as exc:
         raise ConfigurationError(f"invalid configuration: {selected_path}") from exc
     return PipelineOptions.validate_for_phase0(options)
+
+
+def render_options_toml(options: PipelineOptions) -> str:
+    """Serialize effective options without machine-local runtime model paths."""
+
+    raw = cast(dict[str, object], options.model_dump(mode="json"))
+    llm = cast(dict[str, object], raw["llm"])
+    if options.llm.api_key is not None:
+        llm["api_key"] = options.llm.api_key.get_secret_value()
+    for provider_key in ("faster_whisper", "qwen3", "nemo"):
+        provider = cast(
+            dict[str, object], cast(dict[str, object], raw["asr"]).get(provider_key, {})
+        )
+        provider.pop("model_path", None)
+        provider.pop("forced_aligner_path", None)
+    cleaned = cast(dict[str, object], _without_none(raw))
+    return tomli_w.dumps(cleaned)
+
+
+def save_options(
+    options: PipelineOptions,
+    path: Path | None = None,
+    *,
+    overwrite: bool = False,
+) -> Path:
+    """Write canonical TOML atomically to an explicit or platform-default path."""
+
+    selected = path or application_paths().config_file
+    if selected.exists() and not overwrite:
+        raise ConfigurationError(f"configuration already exists: {selected}")
+    selected.parent.mkdir(parents=True, exist_ok=True)
+    temporary = selected.with_suffix(selected.suffix + ".tmp")
+    try:
+        temporary.write_text(render_options_toml(options), encoding="utf-8")
+        temporary.replace(selected)
+    except OSError as exc:
+        raise ConfigurationError(f"could not write configuration: {selected}") from exc
+    return selected
+
+
+def _without_none(value: object) -> object:
+    if isinstance(value, dict):
+        mapping = cast(dict[str, object], value)
+        return {
+            key: _without_none(item)
+            for key, item in mapping.items()
+            if item is not None
+        }
+    if isinstance(value, list):
+        return [_without_none(item) for item in cast(list[object], value)]
+    return value
 
 
 def with_asr_profile(options: PipelineOptions, profile: AsrProfile) -> PipelineOptions:

@@ -114,6 +114,17 @@ def test_import_direction_is_explicit() -> None:
             violations.extend(
                 f"{path}: {name}" for name in imports if name.startswith(forbidden)
             )
+            allowed_captioner = (
+                "captioner.cli",
+                "captioner.shared",
+                "captioner.workflow",
+            )
+            violations.extend(
+                f"{path}: {name}"
+                for name in imports
+                if name.startswith("captioner.")
+                and not name.startswith(allowed_captioner)
+            )
         elif path.is_relative_to(WORKER_ROOT):
             violations.extend(
                 f"{path}: {name}"

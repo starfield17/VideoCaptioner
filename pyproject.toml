@@ -11,6 +11,7 @@ dependencies = [
     "huggingface-hub>=0.34,<2",
     "platformdirs>=4,<5",
     "pydantic>=2,<3",
+    "tomli-w>=1,<2",
 ]
 
 [project.scripts]
