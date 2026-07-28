@@ -1,12 +1,15 @@
 # pyright: reportPrivateUsage=false
 
+import logging
 from pathlib import Path
 
 import pytest
 from scripts.run_real_e2e import (
     _assert_secret_absent,
     _cpu_options,
+    _FallbackAuditHandler,
     _is_cuda_failure,
+    _require_empty_run_record,
 )
 
 from captioner.workflow.options import PipelineOptions
@@ -73,3 +76,37 @@ def test_record_secret_scan_ignores_only_local_configs(tmp_path: Path) -> None:
     (tmp_path / "run.log").write_text("local-secret", encoding="utf-8")
     with pytest.raises(RuntimeError, match="credential leaked"):
         _assert_secret_absent(options, tmp_path)
+
+
+def test_fallback_audit_handler_retains_structured_event() -> None:
+    events: list[dict[str, str]] = []
+    handler = _FallbackAuditHandler(events)
+    record = logging.LogRecord(
+        "captioner.transcription",
+        logging.WARNING,
+        __file__,
+        1,
+        "CUDA ASR failed; retrying once on CPU",
+        (),
+        None,
+    )
+    record.__dict__["fallback"] = "cpu"
+
+    handler.emit(record)
+
+    assert events == [
+        {
+            "level": "WARNING",
+            "message": "CUDA ASR failed; retrying once on CPU",
+            "fallback": "cpu",
+        }
+    ]
+
+
+def test_existing_record_is_rejected_before_a_rerun(tmp_path: Path) -> None:
+    output = tmp_path / "outputs"
+    output.mkdir()
+    (output / "existing.srt").write_text("existing", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="already contains run results"):
+        _require_empty_run_record(tmp_path)

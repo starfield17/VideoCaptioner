@@ -3,6 +3,7 @@
 import argparse
 import hashlib
 import json
+import logging
 import platform
 import shutil
 import subprocess
@@ -38,6 +39,8 @@ def main() -> int:
 
     record_dir = arguments.record_dir.resolve()
     _prepare_record(record_dir)
+    if not arguments.refresh_existing:
+        _require_empty_run_record(record_dir)
     shutil.copy2(
         arguments.config,
         record_dir / "configs" / arguments.config.name,
@@ -115,6 +118,10 @@ def _run_attempt(
     started = time.monotonic()
     output_dir = record_dir / "outputs" / provider / attempt
     output_dir.mkdir(parents=True, exist_ok=True)
+    runtime_events: list[dict[str, str]] = []
+    audit_handler = _FallbackAuditHandler(runtime_events)
+    transcription_logger = logging.getLogger("captioner.transcription")
+    transcription_logger.addHandler(audit_handler)
     payload: dict[str, object]
     try:
         result = run_files(inputs, options, build_services(options), output_dir)
@@ -161,12 +168,33 @@ def _run_attempt(
             "files": [],
             "artifacts": None,
         }
+    finally:
+        transcription_logger.removeHandler(audit_handler)
+    payload["runtime_events"] = runtime_events
     _write_attempt_log(
         record_dir / "logs" / f"{provider}-{attempt}.log",
         payload,
         options,
     )
     return cast(dict[str, object], _sanitized(payload, options))
+
+
+class _FallbackAuditHandler(logging.Handler):
+    def __init__(self, events: list[dict[str, str]]) -> None:
+        super().__init__(level=logging.WARNING)
+        self._events = events
+
+    def emit(self, record: logging.LogRecord) -> None:
+        fallback = record.__dict__.get("fallback")
+        if not isinstance(fallback, str):
+            return
+        self._events.append(
+            {
+                "level": record.levelname,
+                "message": record.getMessage(),
+                "fallback": fallback,
+            }
+        )
 
 
 def _file_summaries(
@@ -327,6 +355,18 @@ def _prepare_record(record_dir: Path) -> None:
         )
 
 
+def _require_empty_run_record(record_dir: Path) -> None:
+    occupied = (record_dir / "summary.json").exists() or any(
+        path.is_file()
+        for directory in ("outputs", "artifacts")
+        for path in (record_dir / directory).rglob("*")
+    )
+    if occupied:
+        raise RuntimeError(
+            f"record directory already contains run results: {record_dir}"
+        )
+
+
 def _command_output(command: tuple[str, ...]) -> str:
     try:
         completed = subprocess.run(
@@ -389,8 +429,7 @@ def _write_readme(record_dir: Path) -> None:
     ]
     for run in summary["runs"]:
         attempts = ", ".join(
-            f"{attempt['device']}={'PASS' if attempt['ok'] else 'FAIL'}"
-            for attempt in run["attempts"]
+            _attempt_description(attempt) for attempt in run["attempts"]
         )
         lines.append(
             f"- {run['provider']}: {'PASS' if run['ok'] else 'FAIL'} ({attempts})"
@@ -404,6 +443,15 @@ def _write_readme(record_dir: Path) -> None:
         ]
     )
     (record_dir / "README.md").write_text("\n".join(lines), encoding="utf-8")
+
+
+def _attempt_description(attempt: dict[str, object]) -> str:
+    device = str(attempt["device"])
+    events = cast(list[dict[str, str]], attempt.get("runtime_events", []))
+    fallbacks = [event["fallback"] for event in events if event.get("fallback")]
+    if fallbacks:
+        device = f"{device}→{fallbacks[-1]}"
+    return f"{device}={'PASS' if attempt['ok'] else 'FAIL'}"
 
 
 def _refresh_existing(options: PipelineOptions, record_dir: Path) -> int:

@@ -5,7 +5,7 @@ import pytest
 
 from captioner.llm.config import LlmOptions
 from captioner.llm.errors import StructuredOutputError
-from captioner.llm.models import LlmToken
+from captioner.llm.models import LlmTextItem, LlmToken
 from captioner.llm.openai_adapter import OpenAICompatibleLlm
 
 
@@ -151,6 +151,57 @@ def test_empty_json_content_gets_one_format_feedback_retry() -> None:
     )
 
     assert result.break_after == ("w1",)
+    assert len(completions.calls) == 2
+
+
+def test_semantic_id_mismatch_gets_bounded_feedback_retry() -> None:
+    completions = _FakeCompletions(
+        [
+            _Response([_Choice(_Message('{"items":[{"id":"cue1","text":"A"}]}'))]),
+            _Response(
+                [
+                    _Choice(
+                        _Message(
+                            '{"items":['
+                            '{"id":"cue1","text":"A"},'
+                            '{"id":"cue2","text":"B"}'
+                            "]}"
+                        )
+                    )
+                ]
+            ),
+        ]
+    )
+    adapter = OpenAICompatibleLlm(
+        _config(structured_output_mode="json_object"),
+        client_factory=lambda: _FakeClient(completions),
+    )
+
+    result = adapter.translate(
+        (
+            LlmTextItem(id="cue1", text="one"),
+            LlmTextItem(id="cue2", text="two"),
+        ),
+        "zh-CN",
+    )
+
+    assert [item.id for item in result.items] == ["cue1", "cue2"]
+    assert len(completions.calls) == 2
+    messages = cast(list[dict[str, str]], completions.calls[1]["messages"])
+    assert "contract_feedback" in messages[1]["content"]
+
+
+def test_semantic_id_mismatch_stops_at_configured_limit() -> None:
+    response = _Response([_Choice(_Message('{"items":[]}'))])
+    completions = _FakeCompletions([response, response])
+    adapter = OpenAICompatibleLlm(
+        _config(max_attempts=2),
+        client_factory=lambda: _FakeClient(completions),
+    )
+
+    with pytest.raises(StructuredOutputError, match="semantic retries"):
+        adapter.correct((LlmTextItem(id="cue1", text="one"),))
+
     assert len(completions.calls) == 2
 
 

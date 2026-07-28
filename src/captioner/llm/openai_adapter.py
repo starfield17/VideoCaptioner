@@ -94,10 +94,12 @@ class OpenAICompatibleLlm:
         }
         if context is not None:
             payload["context"] = context.model_dump(mode="json")
-        return self._complete(
+        expected_ids = {token.id for token in tokens}
+        return self._complete_with_contract(
             SEGMENTATION_SYSTEM,
             payload,
             BoundarySelection,
+            lambda value: _boundary_contract_error(value, expected_ids),
         )
 
     def correct(
@@ -106,10 +108,12 @@ class OpenAICompatibleLlm:
         *,
         context: LlmStageContext | None = None,
     ) -> TextUpdateBatch:
-        return self._complete(
+        expected_ids = {item.id for item in items}
+        return self._complete_with_contract(
             CORRECTION_SYSTEM,
             _text_payload(items, context),
             TextUpdateBatch,
+            lambda value: _text_contract_error(value, expected_ids),
         )
 
     def translate(
@@ -121,10 +125,12 @@ class OpenAICompatibleLlm:
     ) -> TextUpdateBatch:
         payload = _text_payload(items, context)
         payload["target_language"] = target_language
-        return self._complete(
+        expected_ids = {item.id for item in items}
+        return self._complete_with_contract(
             TRANSLATION_SYSTEM,
             payload,
             TextUpdateBatch,
+            lambda value: _text_contract_error(value, expected_ids),
         )
 
     def repair(
@@ -136,11 +142,39 @@ class OpenAICompatibleLlm:
     ) -> TextUpdateBatch:
         payload = _text_payload(items, context)
         payload["target_language"] = target_language
-        return self._complete(
+        expected_ids = {item.id for item in items}
+        return self._complete_with_contract(
             REPAIR_SYSTEM,
             payload,
             TextUpdateBatch,
+            lambda value: _text_contract_error(value, expected_ids),
         )
+
+    def _complete_with_contract[ModelT: BaseModel](
+        self,
+        system_prompt: str,
+        payload: Mapping[str, object],
+        response_type: type[ModelT],
+        contract_error: Callable[[ModelT], str | None],
+    ) -> ModelT:
+        request_payload = dict(payload)
+        for attempt in range(1, self._config.max_attempts + 1):
+            result = self._complete(system_prompt, request_payload, response_type)
+            error = contract_error(result)
+            if error is None:
+                return result
+            if attempt == self._config.max_attempts:
+                raise StructuredOutputError(
+                    f"LLM response exhausted semantic retries: {error}"
+                )
+            request_payload["contract_feedback"] = {
+                "error": error,
+                "instruction": (
+                    "Correct the contract error. Preserve exactly the supplied "
+                    "IDs and return only the requested JSON object."
+                ),
+            }
+        raise AssertionError("semantic retry loop did not return or raise")
 
     def _complete[ModelT: BaseModel](
         self,
@@ -255,6 +289,31 @@ def _text_payload(
     if context is not None:
         payload["context"] = context.model_dump(mode="json")
     return payload
+
+
+def _boundary_contract_error(
+    selection: BoundarySelection,
+    expected_ids: set[str],
+) -> str | None:
+    actual_ids = set(selection.break_after)
+    unknown = actual_ids - expected_ids
+    if unknown:
+        return f"unknown boundary IDs: {sorted(unknown)}"
+    if not actual_ids:
+        return "break_after must contain at least one supplied ID"
+    return None
+
+
+def _text_contract_error(
+    updates: TextUpdateBatch,
+    expected_ids: set[str],
+) -> str | None:
+    actual_ids = {item.id for item in updates.items}
+    if actual_ids == expected_ids and len(updates.items) == len(expected_ids):
+        return None
+    missing = sorted(expected_ids - actual_ids)
+    unknown = sorted(actual_ids - expected_ids)
+    return f"text update IDs do not match; missing={missing}, unknown={unknown}"
 
 
 def _response_content(response: object) -> str:

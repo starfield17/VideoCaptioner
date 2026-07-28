@@ -59,3 +59,5 @@ and a machine-readable summary. Local ignored TOML files may provide an LLM
 `api_key`, `base_url`, and `structured_output_mode`; direct keys are represented
 as `SecretStr` and are masked in run metadata. If a CUDA or shared-library error
 occurs, the runner records that single GPU failure and retries once on CPU.
+CUDA-to-CPU fallback events are retained in `runtime_events`, and a record
+directory containing prior outputs is rejected before another expensive run.
