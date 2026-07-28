@@ -107,11 +107,29 @@ class FasterWhisperWorker:
                     "faster_whisper.WhisperModel is unavailable"
                 )
             constructor = cast(Callable[..., _WhisperModel], constructor_value)
-            self._model = constructor(
-                config.model,
-                device=config.device,
-                compute_type=config.compute_type,
+            model = str(config.model_path) if config.model_path else config.model
+            device = "cuda" if config.device == "auto" else config.device
+            compute_type = (
+                "int8_float16"
+                if config.compute_type == "auto-int8" and device == "cuda"
+                else "int8"
+                if config.compute_type == "auto-int8"
+                else config.compute_type
             )
+            try:
+                self._model = constructor(
+                    model,
+                    device=device,
+                    compute_type=compute_type,
+                )
+            except (OSError, RuntimeError) as exc:
+                if config.device != "auto":
+                    raise
+                message = str(exc).lower()
+                fallback_markers = (".so", "cuda", "cudnn", "cublas", "out of memory")
+                if not any(marker in message for marker in fallback_markers):
+                    raise
+                self._model = constructor(model, device="cpu", compute_type="int8")
             self._config = config
         except (
             CaptionerError,

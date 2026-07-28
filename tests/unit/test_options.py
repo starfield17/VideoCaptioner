@@ -10,7 +10,7 @@ from captioner.workflow.options import PipelineOptions, load_options
 
 def test_defaults_are_strongly_typed() -> None:
     options = PipelineOptions()
-    assert options.asr.provider == "fake"
+    assert options.asr.provider == "faster-whisper"
     assert options.asr.timestamps is TimestampRequirement.REQUIRED
     assert options.output.formats[0].value == "srt"
 

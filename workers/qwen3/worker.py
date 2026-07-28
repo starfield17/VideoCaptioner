@@ -489,8 +489,13 @@ def _default_model_factory(config: Qwen3Config) -> _Qwen3Model:
         "dtype": dtype,
         "device_map": config.device,
     }
-    if config.forced_aligner_model is not None:
-        parameters["forced_aligner"] = config.forced_aligner_model
+    aligner = (
+        str(config.forced_aligner_path)
+        if config.forced_aligner_path is not None
+        else config.forced_aligner_model
+    )
+    if aligner is not None:
+        parameters["forced_aligner"] = aligner
         parameters["forced_aligner_kwargs"] = {
             "dtype": dtype,
             "device_map": config.device,
@@ -501,7 +506,8 @@ def _default_model_factory(config: Qwen3Config) -> _Qwen3Model:
             "qwen_asr.Qwen3ASRModel.from_pretrained is unavailable"
         )
     factory = cast(Callable[..., _Qwen3Model], from_pretrained)
-    return factory(config.model, **parameters)
+    model = str(config.model_path) if config.model_path is not None else config.model
+    return factory(model, **parameters)
 
 
 def _response(result: dict[str, object]) -> str:

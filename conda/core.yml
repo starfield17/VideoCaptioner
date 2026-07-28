@@ -9,6 +9,8 @@ dependencies:
   - ffmpeg
   - pip:
       - pydantic>=2
+      - platformdirs>=4
+      - huggingface-hub>=0.34
       - typer
       - rich
       - openai

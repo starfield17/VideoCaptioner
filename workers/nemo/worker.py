@@ -389,14 +389,38 @@ def _default_model_factory(config: NemoConfig) -> _NemoModel:
         ) from exc
     models = getattr(asr_module, "models", None)
     constructor = getattr(models, "ASRModel", None)
-    from_pretrained = getattr(constructor, "from_pretrained", None)
-    if not callable(from_pretrained):
-        raise ProviderUnavailableError(
-            "nemo.collections.asr.models.ASRModel.from_pretrained is unavailable"
-        )
-    factory = cast(Callable[..., _NemoModel], from_pretrained)
-    model = factory(model_name=config.model)
-    model.to(config.device)
+    if config.model_path is not None:
+        restore_from = getattr(constructor, "restore_from", None)
+        if not callable(restore_from):
+            raise ProviderUnavailableError(
+                "nemo.collections.asr.models.ASRModel.restore_from is unavailable"
+            )
+        matches = tuple(config.model_path.glob("*.nemo"))
+        if len(matches) != 1:
+            raise ProviderUnavailableError(
+                "NeMo model directory must contain one .nemo file"
+            )
+        restore = cast(Callable[..., _NemoModel], restore_from)
+        model = restore(restore_path=str(matches[0]))
+    else:
+        from_pretrained = getattr(constructor, "from_pretrained", None)
+        if not callable(from_pretrained):
+            raise ProviderUnavailableError(
+                "nemo.collections.asr.models.ASRModel.from_pretrained is unavailable"
+            )
+        factory = cast(Callable[..., _NemoModel], from_pretrained)
+        model = factory(model_name=config.model)
+    device = "cuda" if config.device == "auto" else config.device
+    try:
+        model.to(device)
+    except (OSError, RuntimeError) as exc:
+        message = str(exc).lower()
+        fallback_markers = (".so", "cuda", "cudnn", "cublas", "out of memory")
+        if config.device != "auto" or not any(
+            marker in message for marker in fallback_markers
+        ):
+            raise
+        model.to("cpu")
     model.eval()
     return model
 

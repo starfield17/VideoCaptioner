@@ -19,7 +19,8 @@ class NemoConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     model: str = Field(default="nvidia/parakeet-tdt-0.6b-v3", min_length=1)
-    device: str = Field(default="cuda", min_length=1)
+    model_path: Path | None = None
+    device: str = Field(default="auto", min_length=1)
     batch_size: int = Field(default=1, ge=1)
 
 

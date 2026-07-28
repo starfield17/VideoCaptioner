@@ -39,4 +39,4 @@ def test_nemo_defaults_to_parakeet_v3() -> None:
 
     assert isinstance(options.asr, NemoAsrOptions)
     assert options.asr.nemo.model == "nvidia/parakeet-tdt-0.6b-v3"
-    assert options.asr.nemo.device == "cuda"
+    assert options.asr.nemo.device == "auto"

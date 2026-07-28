@@ -50,6 +50,8 @@ def _run_cli_smoke() -> None:
                 "captioner",
                 "run",
                 str(fixture),
+                "--asr-profile",
+                "fake",
                 "--output-dir",
                 str(output_dir),
             ],

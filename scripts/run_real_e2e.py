@@ -19,7 +19,9 @@ from captioner.workflow.api import (
     build_services,
     discover_inputs,
     load_options,
+    prepare_asr_model,
     run_files,
+    with_asr_profile,
 )
 from captioner.workflow.models import ProcessingResult
 
@@ -27,6 +29,8 @@ from captioner.workflow.models import ProcessingResult
 def main() -> int:
     arguments = _parser().parse_args()
     options = load_options(arguments.config)
+    if arguments.asr_profile is not None:
+        options = with_asr_profile(options, arguments.asr_profile)
     if options.asr.provider == "fake":
         raise SystemExit("real E2E requires a real ASR provider")
     if options.llm.provider != "openai-compatible":
@@ -34,9 +38,14 @@ def main() -> int:
 
     record_dir = arguments.record_dir.resolve()
     _prepare_record(record_dir)
+    shutil.copy2(
+        arguments.config,
+        record_dir / "configs" / arguments.config.name,
+    )
     if arguments.refresh_existing:
         return _refresh_existing(options, record_dir)
     inputs = discover_inputs(arguments.input_dir, provider=options.asr.provider)
+    options = prepare_asr_model(options)
     options = options.model_copy(
         update={
             "run": options.run.model_copy(
@@ -74,6 +83,19 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--input-dir", type=Path, required=True)
     parser.add_argument("--record-dir", type=Path, required=True)
+    parser.add_argument(
+        "--asr-profile",
+        choices=(
+            "faster-whisper-turbo",
+            "faster-whisper-small",
+            "faster-whisper-large-v2",
+            "faster-whisper-large-v3",
+            "qwen3-0.6b",
+            "qwen3-1.7b",
+            "nemo-parakeet-v3",
+            "nemo-parakeet-110m-en",
+        ),
+    )
     parser.add_argument("--refresh-existing", action="store_true")
     parser.add_argument(
         "--force-cpu",

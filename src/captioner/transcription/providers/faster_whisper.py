@@ -39,9 +39,10 @@ class FasterWhisperConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    model: str = Field(default="large-v3", min_length=1)
-    device: str = Field(default="cuda", min_length=1)
-    compute_type: str = Field(default="float16", min_length=1)
+    model: str = Field(default="turbo", min_length=1)
+    model_path: Path | None = None
+    device: str = Field(default="auto", min_length=1)
+    compute_type: str = Field(default="auto-int8", min_length=1)
     beam_size: int = Field(default=5, ge=1)
     vad: FasterWhisperVadConfig = Field(default_factory=FasterWhisperVadConfig)
 

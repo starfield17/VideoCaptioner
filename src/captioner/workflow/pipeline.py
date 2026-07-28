@@ -1,6 +1,7 @@
 """Synchronous provider pipeline composition."""
 
 import json
+import logging
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -19,6 +20,7 @@ from captioner.shared.errors import (
     ProviderUnavailableError,
     SubtitleValidationError,
 )
+from captioner.shared.logging import log_extra
 from captioner.subtitles.api import (
     ContentContext,
     QualityReport,
@@ -197,6 +199,15 @@ def run_files(
                     )
                 )
             except Exception as exc:
+                logging.getLogger("captioner.pipeline").error(
+                    "file processing failed",
+                    extra=log_extra(
+                        stage="pipeline",
+                        input=str(input_path),
+                        error_type=type(exc).__name__,
+                    ),
+                    exc_info=True,
+                )
                 failures.append(
                     FileFailure(
                         input_path=input_path,
@@ -267,6 +278,15 @@ def transcribe_files(
                     )
                 )
             except Exception as exc:
+                logging.getLogger("captioner.pipeline").error(
+                    "file transcription failed",
+                    extra=log_extra(
+                        stage="transcription",
+                        input=str(input_path),
+                        error_type=type(exc).__name__,
+                    ),
+                    exc_info=True,
+                )
                 failures.append(
                     FileFailure(
                         input_path=input_path,
@@ -505,6 +525,12 @@ def _atomic_write(path: Path, content: str) -> None:
 
 
 def _log_event(file_dir: Path, stage: str, status: str) -> None:
+    logging.getLogger("captioner.pipeline").info(
+        "%s %s",
+        stage,
+        status,
+        extra=log_extra(stage=stage, status=status),
+    )
     event = {
         "timestamp": datetime.now(UTC).isoformat(),
         "stage": stage,

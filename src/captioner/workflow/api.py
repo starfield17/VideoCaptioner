@@ -4,6 +4,7 @@ from captioner.media.voice_separation import VoiceSeparationOptions
 from captioner.subtitles.glossary import Glossary, GlossaryEntry
 from captioner.subtitles.quality import QualityOptions
 from captioner.workflow.doctor import DoctorReport, run_doctor
+from captioner.workflow.model_preparation import prepare_asr_model
 from captioner.workflow.models import (
     FileFailure,
     ProcessingResult,
@@ -13,6 +14,7 @@ from captioner.workflow.models import (
 )
 from captioner.workflow.options import (
     AsrOptions,
+    AsrProfile,
     AudioOptions,
     CleanupOptions,
     ContextAnalysisOptions,
@@ -30,6 +32,7 @@ from captioner.workflow.options import (
     SegmentationOptions,
     TranslationOptions,
     load_options,
+    with_asr_profile,
     with_keep_workdir,
 )
 from captioner.workflow.pipeline import (
@@ -46,6 +49,7 @@ from captioner.workflow.refine import RefineResult, refine_srt
 
 __all__ = [
     "AsrOptions",
+    "AsrProfile",
     "AudioOptions",
     "CleanupOptions",
     "ContextAnalysisOptions",
@@ -78,6 +82,7 @@ __all__ = [
     "discover_inputs",
     "load_options",
     "process_media",
+    "prepare_asr_model",
     "run_files",
     "refine_srt",
     "TranscriptionResult",
@@ -85,4 +90,5 @@ __all__ = [
     "transcribe_files",
     "run_doctor",
     "with_keep_workdir",
+    "with_asr_profile",
 ]

@@ -16,7 +16,9 @@ from pydantic import (
 
 from captioner.llm.config import LlmOptions
 from captioner.media.voice_separation import VoiceSeparationOptions
+from captioner.shared.app_paths import application_paths
 from captioner.shared.errors import ConfigurationError
+from captioner.shared.logging import LoggingOptions
 from captioner.subtitles.glossary import Glossary
 from captioner.subtitles.quality import QualityOptions
 from captioner.transcription.api import FasterWhisperConfig, NemoConfig, Qwen3Config
@@ -77,7 +79,7 @@ class FakeAsrOptions(BaseModel):
 class FasterWhisperAsrOptions(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    provider: Literal["faster-whisper"]
+    provider: Literal["faster-whisper"] = "faster-whisper"
     language: str = "auto"
     initial_prompt: str = ""
     timestamps: TimestampRequirement = TimestampRequirement.REQUIRED
@@ -87,7 +89,7 @@ class FasterWhisperAsrOptions(BaseModel):
 class Qwen3AsrOptions(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    provider: Literal["qwen3-asr"]
+    provider: Literal["qwen3-asr"] = "qwen3-asr"
     language: str = "auto"
     initial_prompt: str = ""
     timestamps: TimestampRequirement = TimestampRequirement.REQUIRED
@@ -97,7 +99,7 @@ class Qwen3AsrOptions(BaseModel):
 class NemoAsrOptions(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    provider: Literal["nemo-asr"]
+    provider: Literal["nemo-asr"] = "nemo-asr"
     language: str = "auto"
     initial_prompt: str = ""
     timestamps: TimestampRequirement = TimestampRequirement.REQUIRED
@@ -108,6 +110,35 @@ type AsrOptions = Annotated[
     FakeAsrOptions | FasterWhisperAsrOptions | Qwen3AsrOptions | NemoAsrOptions,
     Field(discriminator="provider"),
 ]
+
+type AsrProfile = Literal[
+    "fake",
+    "faster-whisper-turbo",
+    "faster-whisper-small",
+    "faster-whisper-large-v2",
+    "faster-whisper-large-v3",
+    "qwen3-0.6b",
+    "qwen3-1.7b",
+    "nemo-parakeet-v3",
+    "nemo-parakeet-110m-en",
+]
+
+
+class ModelStoreOptions(BaseModel):
+    """Application-owned model download and offline policy."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    cache_dir: Path | None = None
+    endpoint: str = Field(default="https://huggingface.co", min_length=1)
+    offline: bool = False
+
+    @field_validator("endpoint")
+    @classmethod
+    def require_http_endpoint(cls, value: str) -> str:
+        if not value.startswith(("https://", "http://localhost", "http://127.0.0.1")):
+            raise ValueError("models.endpoint must use HTTPS or localhost HTTP")
+        return value.rstrip("/")
 
 
 class SegmentationOptions(BaseModel):
@@ -179,7 +210,8 @@ class PipelineOptions(BaseModel):
 
     run: RunOptions = Field(default_factory=RunOptions)
     audio: AudioOptions = Field(default_factory=AudioOptions)
-    asr: AsrOptions = Field(default_factory=FakeAsrOptions)
+    asr: AsrOptions = Field(default_factory=FasterWhisperAsrOptions)
+    models: ModelStoreOptions = Field(default_factory=ModelStoreOptions)
     context_analysis: ContextAnalysisOptions = Field(
         default_factory=ContextAnalysisOptions
     )
@@ -189,6 +221,7 @@ class PipelineOptions(BaseModel):
     translation: TranslationOptions = Field(default_factory=TranslationOptions)
     repair: RepairOptions = Field(default_factory=RepairOptions)
     llm: LlmOptions = Field(default_factory=LlmOptions)
+    logging: LoggingOptions = Field(default_factory=LoggingOptions)
     subtitle: QualityOptions = Field(default_factory=QualityOptions)
     glossary: Glossary = Field(default_factory=Glossary)
     output: OutputOptions = Field(default_factory=OutputOptions)
@@ -218,17 +251,48 @@ class PipelineOptions(BaseModel):
 
 
 def load_options(config_path: Path | None = None) -> PipelineOptions:
-    """Load strict TOML options or return the documented defaults."""
+    """Load explicit/default TOML options or return built-in defaults."""
 
-    if config_path is None:
+    selected_path = config_path
+    if selected_path is None:
+        candidate = application_paths().config_file
+        selected_path = candidate if candidate.is_file() else None
+    if selected_path is None:
         return PipelineOptions()
     try:
-        with config_path.open("rb") as config_file:
+        with selected_path.open("rb") as config_file:
             raw_config = tomllib.load(config_file)
         options = PipelineOptions.model_validate(raw_config)
     except (OSError, tomllib.TOMLDecodeError, ValidationError) as exc:
-        raise ConfigurationError(f"invalid configuration: {config_path}") from exc
+        raise ConfigurationError(f"invalid configuration: {selected_path}") from exc
     return PipelineOptions.validate_for_phase0(options)
+
+
+def with_asr_profile(options: PipelineOptions, profile: AsrProfile) -> PipelineOptions:
+    """Apply one curated ASR profile without exposing provider internals as flags."""
+
+    if profile == "fake":
+        asr: AsrOptions = FakeAsrOptions()
+    elif profile.startswith("faster-whisper-"):
+        model = profile.removeprefix("faster-whisper-")
+        asr = FasterWhisperAsrOptions(
+            faster_whisper=FasterWhisperConfig(
+                model=model,
+                device="auto",
+                compute_type="auto-int8",
+            )
+        )
+    elif profile.startswith("qwen3-"):
+        size = profile.removeprefix("qwen3-")
+        asr = Qwen3AsrOptions(qwen3=Qwen3Config(model=f"Qwen/Qwen3-ASR-{size.upper()}"))
+    elif profile == "nemo-parakeet-v3":
+        asr = NemoAsrOptions(nemo=NemoConfig())
+    else:
+        asr = NemoAsrOptions(
+            language="en",
+            nemo=NemoConfig(model="nvidia/parakeet-tdt_ctc-110m"),
+        )
+    return options.model_copy(update={"asr": asr})
 
 
 def with_keep_workdir(options: PipelineOptions, keep_workdir: bool) -> PipelineOptions:

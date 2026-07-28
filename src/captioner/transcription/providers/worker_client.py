@@ -1,9 +1,12 @@
 """Blocking NDJSON Worker clients shared by ASR providers."""
 
 import json
+import logging
 import os
 import subprocess
 import sys
+import threading
+from collections import deque
 from contextlib import suppress
 from pathlib import Path
 from typing import cast
@@ -41,6 +44,8 @@ class NdjsonWorkerClient:
         self._expected_provider_id = expected_provider_id
         self._process: subprocess.Popen[str] | None = None
         self.capabilities: AsrCapabilities | None = None
+        self._stderr_tail: deque[str] = deque(maxlen=50)
+        self._stderr_thread: threading.Thread | None = None
 
     def probe(self) -> AsrCapabilities:
         """Start the Worker, perform hello, and shut it down without loading a model."""
@@ -115,6 +120,7 @@ class NdjsonWorkerClient:
         finally:
             self._process = None
             self.capabilities = None
+            self._stderr_thread = None
 
     def _launch(self) -> None:
         repository_root = _repository_root()
@@ -136,6 +142,12 @@ class NdjsonWorkerClient:
                 text=True,
                 bufsize=1,
             )
+            self._stderr_thread = threading.Thread(
+                target=self._drain_stderr,
+                name=f"{self._expected_provider_id}-stderr",
+                daemon=True,
+            )
+            self._stderr_thread.start()
         except OSError as exc:
             raise ProviderUnavailableError(
                 f"could not start {self._expected_provider_id} Worker: {exc}"
@@ -168,10 +180,9 @@ class NdjsonWorkerClient:
             ) from exc
         if not response_line:
             detail = "ASR Worker exited without a response"
-            if process.poll() is not None and process.stderr is not None:
-                stderr = process.stderr.read().strip()
-                if stderr:
-                    detail = f"{detail}: {stderr[-1_000:]}"
+            stderr = "".join(self._stderr_tail).strip()
+            if stderr:
+                detail = f"{detail}: {stderr[-1_000:]}"
             raise TranscriptionError(detail)
         try:
             response = _object(json.loads(response_line), "Worker response")
@@ -182,6 +193,21 @@ class NdjsonWorkerClient:
             message = error.get("message", "unknown ASR Worker error")
             raise TranscriptionError(str(message))
         return _object(response.get("result"), "Worker result")
+
+    def _drain_stderr(self) -> None:
+        process = self._process
+        if process is None or process.stderr is None:
+            return
+        logger = logging.getLogger("captioner.worker")
+        for line in process.stderr:
+            self._stderr_tail.append(line)
+            logger.debug(
+                line.rstrip(),
+                extra={
+                    "stage": "asr-worker",
+                    "provider": self._expected_provider_id,
+                },
+            )
 
 
 class FakeWorkerClient:

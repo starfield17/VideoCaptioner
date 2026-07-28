@@ -1,5 +1,6 @@
 """Synchronous provider transcription services."""
 
+import logging
 from pathlib import Path
 from typing import Protocol
 
@@ -69,6 +70,7 @@ class FasterWhisperTranscriptionService:
         self._config = config
         self._client = client or FasterWhisperWorkerClient()
         self._started = False
+        self._cpu_fallback_used = False
 
     def start(self, model_name: str = "faster-whisper") -> AsrCapabilities:
         del model_name
@@ -96,8 +98,43 @@ class FasterWhisperTranscriptionService:
             raise TranscriptionError(
                 "Faster Whisper Phase 1 requires native word timestamps"
             )
-        return self._client.transcribe(request, artifact_dir)
+        try:
+            return self._client.transcribe(request, artifact_dir)
+        except TranscriptionError as exc:
+            if (
+                self._config.device != "auto"
+                or self._cpu_fallback_used
+                or not _is_cuda_runtime_failure(str(exc))
+            ):
+                raise
+            self._cpu_fallback_used = True
+            logging.getLogger("captioner.transcription").warning(
+                "CUDA ASR failed; retrying once on CPU",
+                extra={"stage": "transcription", "fallback": "cpu"},
+            )
+            self._client.shutdown()
+            self._config = self._config.model_copy(
+                update={"device": "cpu", "compute_type": "int8"}
+            )
+            self._client.start(self._config)
+            return self._client.transcribe(request, artifact_dir)
 
     def shutdown(self) -> None:
         self._client.shutdown()
         self._started = False
+        self._cpu_fallback_used = False
+
+
+def _is_cuda_runtime_failure(message: str) -> bool:
+    lowered = message.lower()
+    return any(
+        marker in lowered
+        for marker in (
+            ".so",
+            "shared librar",
+            "cuda",
+            "cudnn",
+            "cublas",
+            "out of memory",
+        )
+    )

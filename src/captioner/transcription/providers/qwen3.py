@@ -19,9 +19,11 @@ class Qwen3Config(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     model: str = Field(default="Qwen/Qwen3-ASR-1.7B", min_length=1)
+    model_path: Path | None = None
     device: str = Field(default="cuda:0", min_length=1)
     dtype: str = Field(default="bfloat16", min_length=1)
     forced_aligner_model: str | None = "Qwen/Qwen3-ForcedAligner-0.6B"
+    forced_aligner_path: Path | None = None
 
 
 class _Qwen3Worker(Protocol):
