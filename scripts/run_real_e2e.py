@@ -44,9 +44,15 @@ def main() -> int:
         }
     )
 
-    gpu_attempt = _run_attempt(options, inputs, record_dir, "gpu")
-    attempts = [gpu_attempt]
-    if not gpu_attempt["ok"] and _is_cuda_failure(str(gpu_attempt["error"])):
+    first_options = _cpu_options(options) if arguments.force_cpu else options
+    first_name = "cpu" if arguments.force_cpu else "gpu"
+    first_attempt = _run_attempt(first_options, inputs, record_dir, first_name)
+    attempts = [first_attempt]
+    if (
+        not arguments.force_cpu
+        and not first_attempt["ok"]
+        and _is_cuda_failure(str(first_attempt["error"]))
+    ):
         attempts.append(_run_attempt(_cpu_options(options), inputs, record_dir, "cpu"))
 
     provider_summary: dict[str, object] = {
@@ -68,6 +74,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--input-dir", type=Path, required=True)
     parser.add_argument("--record-dir", type=Path, required=True)
     parser.add_argument("--refresh-existing", action="store_true")
+    parser.add_argument(
+        "--force-cpu",
+        action="store_true",
+        help="run the selected ASR provider on CPU without a GPU attempt",
+    )
     return parser
 
 

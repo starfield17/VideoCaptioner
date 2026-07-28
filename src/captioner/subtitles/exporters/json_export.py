@@ -6,10 +6,17 @@ from captioner.shared.errors import ExportError
 from captioner.subtitles.models import SubtitleDocument
 
 
-def write_json(document: SubtitleDocument, output_path: Path) -> Path:
+def write_json(
+    document: SubtitleDocument,
+    output_path: Path,
+    *,
+    overwrite: bool = False,
+) -> Path:
     """Atomically write the canonical subtitle.v1 JSON document."""
 
     try:
+        if output_path.exists() and not overwrite:
+            raise ExportError(f"output already exists: {output_path}")
         output_path.parent.mkdir(parents=True, exist_ok=True)
         temporary_path = output_path.with_suffix(output_path.suffix + ".tmp")
         temporary_path.write_text(

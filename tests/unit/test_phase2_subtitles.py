@@ -1,6 +1,13 @@
 from dataclasses import dataclass
 
-from captioner.llm.api import BoundarySelection, LlmTextItem, LlmToken, TextUpdate
+from captioner.llm.api import (
+    BoundarySelection,
+    ContentContext,
+    LlmStageContext,
+    LlmTextItem,
+    LlmToken,
+    TextUpdate,
+)
 from captioner.llm.errors import LlmRetryableError
 from captioner.llm.models import TextUpdateBatch
 from captioner.shared.errors import LlmPermanentError
@@ -70,10 +77,25 @@ class _StageLlm:
     failed_translation_id: str | None = None
     fail_repair: bool = False
 
-    def choose_boundaries(self, tokens: tuple[LlmToken, ...]) -> BoundarySelection:
+    def analyze_context(self, text: str) -> ContentContext:
+        return ContentContext(summary=text)
+
+    def choose_boundaries(
+        self,
+        tokens: tuple[LlmToken, ...],
+        *,
+        context: LlmStageContext | None = None,
+    ) -> BoundarySelection:
+        del context
         return BoundarySelection(break_after=(tokens[-1].id,))
 
-    def correct(self, items: tuple[LlmTextItem, ...]) -> TextUpdateBatch:
+    def correct(
+        self,
+        items: tuple[LlmTextItem, ...],
+        *,
+        context: LlmStageContext | None = None,
+    ) -> TextUpdateBatch:
+        del context
         if self.failed_correction_id in {item.id for item in items}:
             raise LlmPermanentError("correction batch failed")
         return TextUpdateBatch(
@@ -83,8 +105,13 @@ class _StageLlm:
         )
 
     def translate(
-        self, items: tuple[LlmTextItem, ...], target_language: str
+        self,
+        items: tuple[LlmTextItem, ...],
+        target_language: str,
+        *,
+        context: LlmStageContext | None = None,
     ) -> TextUpdateBatch:
+        del context
         if self.failed_translation_id in {item.id for item in items}:
             raise LlmRetryableError("translation batch failed")
         return TextUpdateBatch(
@@ -95,13 +122,21 @@ class _StageLlm:
         )
 
     def repair(
-        self, items: tuple[LlmTextItem, ...], target_language: str
+        self,
+        items: tuple[LlmTextItem, ...],
+        target_language: str,
+        *,
+        context: LlmStageContext | None = None,
     ) -> TextUpdateBatch:
+        del context
         if self.fail_repair:
             raise LlmPermanentError("repair batch failed")
         return TextUpdateBatch(
             items=tuple(
-                TextUpdate(id=item.id, text=f"{target_language}:repaired")
+                TextUpdate(
+                    id=item.id,
+                    text=f"{target_language}:repaired {item.text}",
+                )
                 for item in items
             )
         )
@@ -126,7 +161,12 @@ def test_serial_and_parallel_stage_results_are_identical() -> None:
         document = service.segment(
             _transcript(), batch_tokens=2, parallelism=parallelism
         )
-        document = service.correct(document, batch_size=2, parallelism=parallelism)
+        document = service.correct(
+            document,
+            batch_size=2,
+            parallelism=parallelism,
+            max_change_ratio=1.0,
+        )
         return service.translate(
             document,
             "fr",
@@ -139,7 +179,9 @@ def test_serial_and_parallel_stage_results_are_identical() -> None:
 
 def test_failed_correction_batch_falls_back_without_losing_other_batches() -> None:
     service = SubtitleService(_StageLlm(failed_correction_id="cue2"))
-    document = service.correct(_document(), batch_size=2, parallelism=8)
+    document = service.correct(
+        _document(), batch_size=2, parallelism=8, max_change_ratio=1.0
+    )
 
     assert document.cues[0].corrected_text == "corrected source 0"
     assert document.cues[1].corrected_text == "corrected source 1"
@@ -151,7 +193,9 @@ def test_failed_correction_batch_falls_back_without_losing_other_batches() -> No
 def test_translation_waits_for_complete_correction_and_repair_runs_once() -> None:
     llm = _StageLlm(failed_translation_id="cue2")
     service = SubtitleService(llm)
-    corrected = service.correct(_document(), batch_size=2, parallelism=8)
+    corrected = service.correct(
+        _document(), batch_size=2, parallelism=8, max_change_ratio=1.0
+    )
     translated = service.translate(
         corrected,
         "fr",
@@ -167,7 +211,7 @@ def test_translation_waits_for_complete_correction_and_repair_runs_once() -> Non
     assert translated.cues[0].translated_text == "fr:corrected source 0"
     assert translated.cues[2].translated_text is None
     assert report.has_repairable_issues
-    assert repaired.cues[2].translated_text == "fr:repaired"
+    assert repaired.cues[2].translated_text == "fr:repaired corrected source 2"
     assert not final_report.has_repairable_issues
 
 

@@ -7,6 +7,17 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from captioner.subtitles.glossary import Glossary, GlossaryEntry
 
+_REPAIRABLE_CODES = {
+    "empty_translation",
+    "glossary_missing",
+    "number_missing",
+    "protected_content_missing",
+    "target_language_unexpected",
+    "translation_missing",
+    "translation_too_long",
+    "translation_unchanged",
+}
+
 
 class SubtitleCue(BaseModel):
     """One stable subtitle cue with independent text variants."""
@@ -88,8 +99,7 @@ class QualityReport(BaseModel):
     @property
     def has_repairable_issues(self) -> bool:
         return any(
-            issue.code in {"translation_missing", "empty_translation"}
-            and issue.cue_id is not None
+            issue.code in _REPAIRABLE_CODES and issue.cue_id is not None
             for issue in self.issues
         )
 
@@ -100,8 +110,7 @@ class QualityReport(BaseModel):
         return tuple(
             issue.cue_id
             for issue in self.issues
-            if issue.code in {"translation_missing", "empty_translation"}
-            and issue.cue_id is not None
+            if issue.code in _REPAIRABLE_CODES and issue.cue_id is not None
         )
 
 

@@ -1,5 +1,6 @@
 """Deterministic cue construction from transcript timing."""
 
+import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 
@@ -20,6 +21,23 @@ class _Piece:
 
 
 SegmentationPiece = _Piece
+
+
+@dataclass(frozen=True)
+class SegmentationWindow:
+    """One owner range with read-only overlap tokens."""
+
+    tokens: tuple[LlmToken, ...]
+    owner_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class SegmentationConstraints:
+    max_duration_ms: int = 7_000
+    max_chars_cjk: int = 24
+    max_words_latin: int = 14
+    max_cps: float = 17.0
+    silence_boundary_ms: int = 700
 
 
 def segment_transcript(
@@ -51,6 +69,80 @@ def make_segmentation_pieces(
     """Expose immutable owner pieces to the batched subtitle service."""
 
     return _pieces(transcript)
+
+
+def make_segmentation_windows(
+    tokens: tuple[LlmToken, ...],
+    owner_size: int,
+    overlap: int,
+) -> tuple[SegmentationWindow, ...]:
+    windows: list[SegmentationWindow] = []
+    for owner_start in range(0, len(tokens), owner_size):
+        owner_end = min(len(tokens), owner_start + owner_size)
+        request_start = max(0, owner_start - overlap)
+        request_end = min(len(tokens), owner_end + overlap)
+        windows.append(
+            SegmentationWindow(
+                tokens=tokens[request_start:request_end],
+                owner_ids=tuple(token.id for token in tokens[owner_start:owner_end]),
+            )
+        )
+    return tuple(windows)
+
+
+def constrain_boundaries(
+    pieces: tuple[SegmentationPiece, ...],
+    proposed_ids: Iterable[str],
+    constraints: SegmentationConstraints,
+) -> BoundarySelection:
+    """Merge semantic choices with deterministic readability boundaries."""
+
+    proposed = set(proposed_ids)
+    selected: list[str] = []
+    cue_start = 0
+    candidate: int | None = None
+    for index, piece in enumerate(pieces):
+        gap = _gap_after(pieces, index)
+        if _has_terminal_punctuation(piece.text) or (
+            gap >= constraints.silence_boundary_ms
+        ):
+            candidate = index
+        text = _join_text(value.text for value in pieces[cue_start : index + 1])
+        duration_ms = piece.end_ms - pieces[cue_start].start_ms
+        cjk_count = sum(1 for character in text if _looks_cjk(character))
+        latin_words = len(re.findall(r"[A-Za-z]+(?:'[A-Za-z]+)?", text))
+        cps = len(text.replace(" ", "")) / max(duration_ms / 1_000, 0.001)
+        exceeded = (
+            duration_ms > constraints.max_duration_ms
+            or cjk_count > constraints.max_chars_cjk
+            or latin_words > constraints.max_words_latin
+            or (
+                duration_ms >= constraints.max_duration_ms // 2
+                and cps > constraints.max_cps
+            )
+        )
+        cut: int | None = None
+        if piece.id in proposed:
+            cut = index
+        elif exceeded:
+            cut = (
+                candidate
+                if candidate is not None and candidate >= cue_start
+                else max(cue_start, index - 1)
+            )
+        if cut is not None:
+            boundary_id = pieces[cut].id
+            if not selected or selected[-1] != boundary_id:
+                selected.append(boundary_id)
+            cue_start = cut + 1
+            candidate = None
+    if pieces and (not selected or selected[-1] != pieces[-1].id):
+        selected.append(pieces[-1].id)
+    return BoundarySelection(break_after=tuple(selected))
+
+
+def _has_terminal_punctuation(text: str) -> bool:
+    return text.rstrip().endswith(("。", "！", "？", ".", "!", "?", ";", "；"))
 
 
 def _pieces(transcript: TranscriptDocument) -> tuple[_Piece, ...]:
@@ -102,7 +194,7 @@ def _rule_boundaries(tokens: tuple[LlmToken, ...]) -> BoundarySelection:
     selected = [
         token.id
         for token in tokens
-        if token.text.rstrip().endswith(("。", "！", "？", ".", "!", "?"))
+        if _has_terminal_punctuation(token.text) or token.gap_after_ms >= 700
     ]
     if tokens and tokens[-1].id not in selected:
         selected.append(tokens[-1].id)
@@ -191,8 +283,12 @@ def _looks_cjk(character: str) -> bool:
 
 __all__ = [
     "SegmentationPiece",
+    "SegmentationConstraints",
+    "SegmentationWindow",
     "build_subtitle_document",
+    "constrain_boundaries",
     "make_segmentation_pieces",
+    "make_segmentation_windows",
     "rule_boundaries",
     "segment_transcript",
 ]

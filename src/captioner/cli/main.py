@@ -10,7 +10,11 @@ from captioner.cli import refine_command
 from captioner.shared.errors import (
     ConfigurationError,
     ExportError,
+    LlmAuthenticationError,
+    LlmPermanentError,
+    LlmRetryableError,
     ProviderUnavailableError,
+    StructuredOutputError,
     SubtitleValidationError,
 )
 from captioner.workflow.api import (
@@ -31,7 +35,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     arguments = parser.parse_args(argv)
     try:
         if arguments.command == "doctor":
-            return _doctor(arguments.config, arguments.provider, arguments.load_model)
+            return _doctor(
+                arguments.config,
+                arguments.provider,
+                arguments.load_model,
+                arguments.output_dir,
+            )
         if arguments.command == "transcribe":
             return _transcribe(arguments)
         if arguments.command == "refine":
@@ -43,6 +52,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     except ProviderUnavailableError as exc:
         print(f"ASR provider unavailable: {exc}", file=sys.stderr)
         return 3
+    except (
+        LlmAuthenticationError,
+        LlmPermanentError,
+        LlmRetryableError,
+        StructuredOutputError,
+    ) as exc:
+        print(f"LLM provider error: {exc}", file=sys.stderr)
+        return 4
     except ExportError as exc:
         print(f"output error: {exc}", file=sys.stderr)
         return 5
@@ -61,6 +78,7 @@ def _build_parser() -> argparse.ArgumentParser:
     doctor.add_argument("--config", type=Path)
     doctor.add_argument("--provider", choices=("fake", "faster-whisper", "qwen3-asr"))
     doctor.add_argument("--load-model", action="store_true")
+    doctor.add_argument("--output-dir", type=Path, default=Path.cwd())
 
     run = commands.add_parser("run", help="run the selected provider pipeline")
     _add_pipeline_arguments(run)
@@ -87,9 +105,15 @@ def _doctor(
     config_path: Path | None,
     provider: str | None,
     load_model: bool,
+    output_dir: Path,
 ) -> int:
     options = load_options(config_path)
-    report = run_doctor(options, provider=provider, load_model=load_model)
+    report = run_doctor(
+        options,
+        provider=provider,
+        load_model=load_model,
+        output_dir=output_dir,
+    )
     print(
         json.dumps(
             {"ok": report.ok, "checks": report.checks, "details": report.details}

@@ -21,12 +21,24 @@ class TranscriptionError(CaptionerError):
     """The ASR worker returned an invalid or failed result."""
 
 
+class AlignmentError(CaptionerError):
+    """A forced aligner could not produce a valid timed transcript."""
+
+
 class LlmAuthenticationError(CaptionerError):
     """An LLM adapter was not authenticated."""
 
 
 class LlmPermanentError(CaptionerError):
     """An LLM request failed permanently."""
+
+
+class LlmRetryableError(CaptionerError):
+    """A bounded LLM retry policy exhausted a transient request."""
+
+
+class StructuredOutputError(CaptionerError):
+    """An LLM response did not satisfy its structured schema."""
 
 
 class SubtitleValidationError(CaptionerError):

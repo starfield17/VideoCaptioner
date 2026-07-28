@@ -49,6 +49,22 @@ class AudioOptions(BaseModel):
     )
 
 
+class ContextAnalysisOptions(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = True
+    max_characters: int = Field(default=50_000, ge=1)
+
+
+class CleanupOptions(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    fillers: tuple[str, ...] = ()
+    non_speech_markers: tuple[str, ...] = ()
+    collapse_repetitions: bool = False
+
+
 class FakeAsrOptions(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -89,7 +105,15 @@ class SegmentationOptions(BaseModel):
 
     enabled: bool = True
     batch_tokens: int = Field(default=800, ge=1)
+    overlap_tokens: int = Field(default=0, ge=0)
+    silence_boundary_ms: int = Field(default=700, ge=0)
     parallelism: int = Field(default=4, ge=1, le=100)
+
+    @model_validator(mode="after")
+    def overlap_is_smaller_than_owner_batch(self) -> Self:
+        if self.overlap_tokens >= self.batch_tokens:
+            raise ValueError("overlap_tokens must be smaller than batch_tokens")
+        return self
 
 
 class CorrectionOptions(BaseModel):
@@ -98,6 +122,7 @@ class CorrectionOptions(BaseModel):
     enabled: bool = True
     batch_size: int = Field(default=30, ge=1)
     parallelism: int = Field(default=8, ge=1, le=100)
+    max_change_ratio: float = Field(default=0.5, ge=0.0, le=1.0)
 
 
 class TranslationOptions(BaseModel):
@@ -123,6 +148,7 @@ class OutputOptions(BaseModel):
 
     formats: tuple[OutputFormat, ...] = (OutputFormat.SRT, OutputFormat.JSON)
     bilingual: bool = True
+    overwrite: Literal["error", "replace"] = "error"
 
     @field_validator("formats")
     @classmethod
@@ -144,8 +170,12 @@ class PipelineOptions(BaseModel):
     run: RunOptions = Field(default_factory=RunOptions)
     audio: AudioOptions = Field(default_factory=AudioOptions)
     asr: AsrOptions = Field(default_factory=FakeAsrOptions)
+    context_analysis: ContextAnalysisOptions = Field(
+        default_factory=ContextAnalysisOptions
+    )
     segmentation: SegmentationOptions = Field(default_factory=SegmentationOptions)
     correction: CorrectionOptions = Field(default_factory=CorrectionOptions)
+    cleanup: CleanupOptions = Field(default_factory=CleanupOptions)
     translation: TranslationOptions = Field(default_factory=TranslationOptions)
     repair: RepairOptions = Field(default_factory=RepairOptions)
     llm: LlmOptions = Field(default_factory=LlmOptions)

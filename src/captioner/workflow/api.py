@@ -14,6 +14,8 @@ from captioner.workflow.models import (
 from captioner.workflow.options import (
     AsrOptions,
     AudioOptions,
+    CleanupOptions,
+    ContextAnalysisOptions,
     CorrectionOptions,
     FakeAsrOptions,
     FasterWhisperAsrOptions,
@@ -44,6 +46,8 @@ from captioner.workflow.refine import RefineResult, refine_srt
 __all__ = [
     "AsrOptions",
     "AudioOptions",
+    "CleanupOptions",
+    "ContextAnalysisOptions",
     "VoiceSeparationOptions",
     "CorrectionOptions",
     "DoctorReport",

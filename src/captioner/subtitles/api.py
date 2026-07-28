@@ -1,5 +1,6 @@
 """Public subtitle API."""
 
+from captioner.llm.api import ContentContext
 from captioner.subtitles.glossary import Glossary, GlossaryEntry
 from captioner.subtitles.importers.srt import parse_srt, read_srt
 from captioner.subtitles.models import (
@@ -20,6 +21,7 @@ __all__ = [
     "SubtitleCue",
     "SubtitleDocument",
     "SubtitleService",
+    "ContentContext",
     "Glossary",
     "GlossaryEntry",
     "parse_srt",

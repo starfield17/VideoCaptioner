@@ -1,6 +1,8 @@
 """Synchronous provider pipeline composition."""
 
+import json
 from dataclasses import dataclass, replace
+from datetime import UTC, datetime
 from pathlib import Path
 
 from captioner.llm.fake import FakeLlm
@@ -15,8 +17,15 @@ from captioner.shared.errors import (
     CaptionerError,
     ConfigurationError,
     ProviderUnavailableError,
+    SubtitleValidationError,
 )
-from captioner.subtitles.api import QualityReport, SubtitleDocument, SubtitleService
+from captioner.subtitles.api import (
+    ContentContext,
+    QualityReport,
+    SubtitleDocument,
+    SubtitleService,
+)
+from captioner.subtitles.segmentation import SegmentationConstraints
 from captioner.transcription.api import (
     FakeTranscriptionService,
     FasterWhisperTranscriptionService,
@@ -307,39 +316,87 @@ def _process_one(
         services,
         workspace,
     )
+    mutable_warnings = list(warnings)
+    context: ContentContext | None = None
+    if options.context_analysis.enabled and (
+        options.segmentation.enabled
+        or options.correction.enabled
+        or options.translation.enabled
+    ):
+        context_text = transcript.text
+        if len(context_text) > options.context_analysis.max_characters:
+            context_text = context_text[: options.context_analysis.max_characters]
+            mutable_warnings.append("context_analysis_truncated")
+        try:
+            context = services.subtitles.analyze_context(context_text)
+        except CaptionerError as exc:
+            context = ContentContext()
+            mutable_warnings.append(f"context_analysis_fallback:{type(exc).__name__}")
+        _atomic_write(
+            file_dir / "content_context.json",
+            context.model_dump_json(indent=2),
+        )
+        _log_event(file_dir, "context_analysis", "completed")
     subtitle = services.subtitles.segment(
         transcript,
+        context=context,
         batch_tokens=options.segmentation.batch_tokens,
+        overlap_tokens=options.segmentation.overlap_tokens,
+        constraints=SegmentationConstraints(
+            max_duration_ms=options.subtitle.max_duration_ms,
+            max_chars_cjk=options.subtitle.max_chars_cjk,
+            max_words_latin=options.subtitle.max_words_latin,
+            max_cps=options.subtitle.max_cps,
+            silence_boundary_ms=options.segmentation.silence_boundary_ms,
+        ),
         parallelism=options.segmentation.parallelism,
     )
     _write_document(file_dir / "subtitle.segmented.json", subtitle)
+    _log_event(file_dir, "segmentation", "completed")
 
     if options.correction.enabled:
         subtitle = services.subtitles.correct(
             subtitle,
+            context=context,
             batch_size=options.correction.batch_size,
             parallelism=options.correction.parallelism,
+            max_change_ratio=options.correction.max_change_ratio,
         )
         _write_document(file_dir / "subtitle.corrected.json", subtitle)
+        _log_event(file_dir, "correction", "completed")
+
+    if options.cleanup.enabled:
+        subtitle = services.subtitles.cleanup(
+            subtitle,
+            fillers=options.cleanup.fillers,
+            non_speech_markers=options.cleanup.non_speech_markers,
+            collapse_repetitions=options.cleanup.collapse_repetitions,
+        )
+        _write_document(file_dir / "subtitle.cleaned.json", subtitle)
+        _log_event(file_dir, "cleanup", "completed")
 
     if options.translation.enabled:
         subtitle = services.subtitles.translate(
             subtitle,
             target_language=options.translation.target_language,
-            allow_partial=options.translation.allow_partial,
+            allow_partial=True,
+            context=context,
             batch_size=options.translation.batch_size,
             parallelism=options.translation.parallelism,
         )
         _write_document(file_dir / "subtitle.translated.json", subtitle)
+        _log_event(file_dir, "translation", "completed")
 
     quality_report = services.subtitles.check_quality(
         subtitle, options=options.subtitle
     )
     _write_quality(file_dir / "quality.json", quality_report)
+    _log_event(file_dir, "quality", "completed")
     if options.repair.enabled and quality_report.has_repairable_issues:
         subtitle = services.subtitles.repair(
             subtitle,
             quality_report,
+            context=context,
             batch_size=options.repair.batch_size,
             parallelism=options.repair.parallelism,
         )
@@ -348,6 +405,15 @@ def _process_one(
             subtitle, options=options.subtitle
         )
         _write_quality(file_dir / "quality.json", quality_report)
+        _log_event(file_dir, "repair", "completed")
+    if (
+        options.translation.enabled
+        and not options.translation.allow_partial
+        and any(cue.translated_text is None for cue in subtitle.cues)
+    ):
+        raise SubtitleValidationError(
+            "translation remains incomplete after repair and partial output is disabled"
+        )
     formats = tuple(output_format.value for output_format in options.output.formats)
     output_paths = services.subtitles.export(
         subtitle,
@@ -355,14 +421,17 @@ def _process_one(
         basename=input_path.stem,
         formats=formats,
         bilingual=options.output.bilingual,
+        quality_options=options.subtitle,
+        overwrite=options.output.overwrite == "replace",
     )
+    _log_event(file_dir, "export", "completed")
     return ProcessingResult(
         input_path=input_path,
         subtitle=subtitle,
         quality_report=quality_report,
         output_paths=output_paths,
         workdir=workspace.root,
-        warnings=warnings,
+        warnings=tuple(mutable_warnings),
     )
 
 
@@ -375,6 +444,7 @@ def _transcribe_input(
 ) -> tuple[Path, TranscriptDocument, tuple[str, ...]]:
     file_dir = workspace.file_dir(index, input_path)
     audio = services.media.prepare_audio(input_path, file_dir)
+    _log_event(file_dir, "media", "completed")
     warnings: list[str] = []
     if options.audio.voice_separation.enabled:
         separator = services.voice_separator
@@ -386,6 +456,7 @@ def _transcribe_input(
         else:
             try:
                 audio = separator.separate(audio, file_dir / "vocals.wav")
+                _log_event(file_dir, "voice_separation", "completed")
             except VoiceSeparationError as exc:
                 if options.audio.voice_separation.required:
                     raise
@@ -396,11 +467,9 @@ def _transcribe_input(
         initial_prompt=options.asr.initial_prompt or None,
         timestamps=options.asr.timestamps,
     )
-    return (
-        file_dir,
-        services.transcription.transcribe(request, file_dir),
-        tuple(warnings),
-    )
+    transcript = services.transcription.transcribe(request, file_dir)
+    _log_event(file_dir, "transcription", "completed")
+    return (file_dir, transcript, tuple(warnings))
 
 
 def _write_document(path: Path, document: SubtitleDocument) -> None:
@@ -421,6 +490,16 @@ def _atomic_write(path: Path, content: str) -> None:
     temporary_path = path.with_suffix(path.suffix + ".tmp")
     temporary_path.write_text(content + "\n", encoding="utf-8")
     temporary_path.replace(path)
+
+
+def _log_event(file_dir: Path, stage: str, status: str) -> None:
+    event = {
+        "timestamp": datetime.now(UTC).isoformat(),
+        "stage": stage,
+        "status": status,
+    }
+    with (file_dir / "processing.log").open("a", encoding="utf-8") as log_file:
+        log_file.write(json.dumps(event, ensure_ascii=False) + "\n")
 
 
 _MEDIA_SUFFIXES = {

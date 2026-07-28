@@ -1,5 +1,11 @@
 """Small stable prompts for the OpenAI-compatible adapter."""
 
+CONTEXT_SYSTEM = (
+    "You analyze one transcript for later subtitle processing. Return only the "
+    "requested strict JSON object. Summarize the content, domain, tone, named "
+    "entities, and useful terminology. Do not rewrite the transcript."
+)
+
 SEGMENTATION_SYSTEM = (
     "You are a subtitle segmentation assistant. Return only the requested "
     "strict JSON object. Choose break_after IDs from the supplied token IDs. "
@@ -26,6 +32,7 @@ REPAIR_SYSTEM = (
 
 
 __all__ = [
+    "CONTEXT_SYSTEM",
     "CORRECTION_SYSTEM",
     "REPAIR_SYSTEM",
     "SEGMENTATION_SYSTEM",

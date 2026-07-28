@@ -1,8 +1,12 @@
 """Provider environment diagnostics."""
 
+import os
 import shutil
+import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass
+from pathlib import Path
 
 from captioner.shared.errors import CaptionerError
 from captioner.transcription.api import (
@@ -20,6 +24,7 @@ from captioner.workflow.options import (
     PipelineOptions,
     Qwen3AsrOptions,
 )
+from captioner.workflow.pipeline import build_subtitle_service
 
 
 @dataclass(frozen=True)
@@ -38,6 +43,7 @@ def run_doctor(
     options: PipelineOptions,
     provider: str | None = None,
     load_model: bool = False,
+    output_dir: Path | None = None,
 ) -> DoctorReport:
     """Check the selected provider without downloading a model by default."""
 
@@ -47,6 +53,8 @@ def run_doctor(
         "python_3_13": sys.version_info[:2] == (3, 13),
         "conda": shutil.which("conda") is not None,
         "ffmpeg": shutil.which("ffmpeg") is not None,
+        "output_directory": False,
+        "gpu_cuda": True,
         "configuration": True,
         "provider_environment": False,
     }
@@ -57,6 +65,48 @@ def run_doctor(
         "configuration": "valid",
         "provider": selected_provider,
     }
+    selected_output = output_dir or Path.cwd()
+    try:
+        selected_output.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(dir=selected_output):
+            pass
+        checks["output_directory"] = True
+        details["output_directory"] = f"writable: {selected_output}"
+    except OSError as exc:
+        details["output_directory"] = str(exc)
+
+    nvidia_smi = shutil.which("nvidia-smi")
+    if nvidia_smi is None:
+        details["gpu_cuda"] = "nvidia-smi not found; CPU execution remains available"
+    else:
+        result = subprocess.run(
+            (nvidia_smi, "--query-gpu=name,driver_version", "--format=csv,noheader"),
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        checks["gpu_cuda"] = result.returncode == 0
+        details["gpu_cuda"] = (
+            result.stdout.strip() if result.returncode == 0 else result.stderr.strip()
+        )
+
+    if options.audio.voice_separation.enabled:
+        command = os.getenv(options.audio.voice_separation.command_env, "")
+        checks["voice_separation_command"] = bool(command)
+        details["voice_separation_command"] = (
+            "configured" if command else "not configured"
+        )
+
+    if options.llm.provider == "openai-compatible":
+        checks["llm_api"] = False
+        try:
+            build_subtitle_service(options).analyze_context(
+                "Doctor connectivity probe."
+            )
+            checks["llm_api"] = True
+            details["llm_api"] = "structured context probe succeeded"
+        except CaptionerError as exc:
+            details["llm_api"] = f"{type(exc).__name__}: {exc}"
 
     if selected_provider == "fake":
         worker = FakeTranscriptionService()

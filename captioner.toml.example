@@ -27,12 +27,25 @@ timestamps = "required"
 [segmentation]
 enabled = true
 batch_tokens = 800
+overlap_tokens = 80
+silence_boundary_ms = 700
 parallelism = 4
+
+[context_analysis]
+enabled = true
+max_characters = 50000
 
 [correction]
 enabled = true
 batch_size = 30
 parallelism = 8
+max_change_ratio = 0.5
+
+[cleanup]
+enabled = false
+fillers = []
+non_speech_markers = []
+collapse_repetitions = false
 
 [translation]
 enabled = true
@@ -75,3 +88,4 @@ backoff_max_seconds = 8
 [output]
 formats = ["srt", "json"]
 bilingual = true
+overwrite = "error"

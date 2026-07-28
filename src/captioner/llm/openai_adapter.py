@@ -13,11 +13,14 @@ from captioner.llm.config import LlmOptions
 from captioner.llm.errors import LlmRetryableError, StructuredOutputError
 from captioner.llm.models import (
     BoundarySelection,
+    ContentContext,
+    LlmStageContext,
     LlmTextItem,
     LlmToken,
     TextUpdateBatch,
 )
 from captioner.llm.prompts import (
+    CONTEXT_SYSTEM,
     CORRECTION_SYSTEM,
     REPAIR_SYSTEM,
     SEGMENTATION_SYSTEM,
@@ -72,7 +75,15 @@ class OpenAICompatibleLlm:
             random_source=random_source,
         )
 
-    def choose_boundaries(self, tokens: tuple[LlmToken, ...]) -> BoundarySelection:
+    def analyze_context(self, text: str) -> ContentContext:
+        return self._complete(CONTEXT_SYSTEM, {"transcript": text}, ContentContext)
+
+    def choose_boundaries(
+        self,
+        tokens: tuple[LlmToken, ...],
+        *,
+        context: LlmStageContext | None = None,
+    ) -> BoundarySelection:
         payload = {
             "tokens": [token.model_dump(mode="json") for token in tokens],
             "constraints": {
@@ -81,40 +92,53 @@ class OpenAICompatibleLlm:
                 "max_words_latin": 14,
             },
         }
+        if context is not None:
+            payload["context"] = context.model_dump(mode="json")
         return self._complete(
             SEGMENTATION_SYSTEM,
             payload,
             BoundarySelection,
         )
 
-    def correct(self, items: tuple[LlmTextItem, ...]) -> TextUpdateBatch:
+    def correct(
+        self,
+        items: tuple[LlmTextItem, ...],
+        *,
+        context: LlmStageContext | None = None,
+    ) -> TextUpdateBatch:
         return self._complete(
             CORRECTION_SYSTEM,
-            {"items": [item.model_dump(mode="json") for item in items]},
+            _text_payload(items, context),
             TextUpdateBatch,
         )
 
     def translate(
-        self, items: tuple[LlmTextItem, ...], target_language: str
+        self,
+        items: tuple[LlmTextItem, ...],
+        target_language: str,
+        *,
+        context: LlmStageContext | None = None,
     ) -> TextUpdateBatch:
+        payload = _text_payload(items, context)
+        payload["target_language"] = target_language
         return self._complete(
             TRANSLATION_SYSTEM,
-            {
-                "target_language": target_language,
-                "items": [item.model_dump(mode="json") for item in items],
-            },
+            payload,
             TextUpdateBatch,
         )
 
     def repair(
-        self, items: tuple[LlmTextItem, ...], target_language: str
+        self,
+        items: tuple[LlmTextItem, ...],
+        target_language: str,
+        *,
+        context: LlmStageContext | None = None,
     ) -> TextUpdateBatch:
+        payload = _text_payload(items, context)
+        payload["target_language"] = target_language
         return self._complete(
             REPAIR_SYSTEM,
-            {
-                "target_language": target_language,
-                "items": [item.model_dump(mode="json") for item in items],
-            },
+            payload,
             TextUpdateBatch,
         )
 
@@ -219,6 +243,18 @@ def _json_payload(payload: Mapping[str, object]) -> str:
     import json
 
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+
+
+def _text_payload(
+    items: tuple[LlmTextItem, ...],
+    context: LlmStageContext | None,
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "items": [item.model_dump(mode="json") for item in items]
+    }
+    if context is not None:
+        payload["context"] = context.model_dump(mode="json")
+    return payload
 
 
 def _response_content(response: object) -> str:
