@@ -1,0 +1,17 @@
+name: captioner-asr-nemo
+
+channels:
+  - conda-forge
+
+dependencies:
+  - python=3.13
+  - pip
+  - ffmpeg
+  - libsndfile
+  - cython
+  - packaging
+  - pip:
+      - "nemo_toolkit[asr]==2.7.3"
+      - pydantic>=2
+      - setuptools>=75
+      - -e ..

@@ -29,6 +29,7 @@ from captioner.subtitles.segmentation import SegmentationConstraints
 from captioner.transcription.api import (
     FakeTranscriptionService,
     FasterWhisperTranscriptionService,
+    NemoTranscriptionService,
     Qwen3TranscriptionService,
     TranscriptDocument,
     TranscriptionRequest,
@@ -43,6 +44,7 @@ from captioner.workflow.models import (
 )
 from captioner.workflow.options import (
     FasterWhisperAsrOptions,
+    NemoAsrOptions,
     PipelineOptions,
     Qwen3AsrOptions,
 )
@@ -120,6 +122,16 @@ def build_services(options: PipelineOptions) -> PipelineServices:
                 options.asr.qwen3,
                 timestamps=options.asr.timestamps,
             ),
+            subtitles=subtitles,
+            voice_separator=voice_separator,
+        )
+    if isinstance(options.asr, NemoAsrOptions):
+        return PipelineServices(
+            media=FfmpegMediaService(
+                sample_rate=options.audio.sample_rate,
+                channels=options.audio.channels,
+            ),
+            transcription=NemoTranscriptionService(options.asr.nemo),
             subtitles=subtitles,
             voice_separator=voice_separator,
         )

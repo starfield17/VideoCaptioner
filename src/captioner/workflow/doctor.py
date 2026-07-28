@@ -14,6 +14,9 @@ from captioner.transcription.api import (
     FasterWhisperConfig,
     FasterWhisperTranscriptionService,
     FasterWhisperWorkerClient,
+    NemoConfig,
+    NemoTranscriptionService,
+    NemoWorkerClient,
     Qwen3Config,
     Qwen3TranscriptionService,
     Qwen3WorkerClient,
@@ -21,6 +24,7 @@ from captioner.transcription.api import (
 from captioner.transcription.requests import TimestampRequirement
 from captioner.workflow.options import (
     FasterWhisperAsrOptions,
+    NemoAsrOptions,
     PipelineOptions,
     Qwen3AsrOptions,
 )
@@ -179,6 +183,35 @@ def run_doctor(
                 timestamps=timestamps,
                 client=load_client,
             )
+            try:
+                service.start()
+                checks["model_load"] = True
+                details["model_load"] = f"loaded={config.model}"
+            except CaptionerError as exc:
+                details["model_load"] = str(exc)
+            finally:
+                service.shutdown()
+    elif selected_provider == "nemo-asr":
+        config = (
+            options.asr.nemo
+            if isinstance(options.asr, NemoAsrOptions)
+            else NemoConfig()
+        )
+        client = NemoWorkerClient()
+        try:
+            capabilities = client.probe()
+            checks["provider_environment"] = True
+            details["provider_environment"] = (
+                "provider=nemo-asr, "
+                f"native_word_timestamps={capabilities.native_word_timestamps}, "
+                f"language_detection={capabilities.language_detection}"
+            )
+        except CaptionerError as exc:
+            details["provider_environment"] = str(exc)
+        if load_model and checks["provider_environment"]:
+            checks["model_load"] = False
+            load_client = NemoWorkerClient()
+            service = NemoTranscriptionService(config, load_client)
             try:
                 service.start()
                 checks["model_load"] = True

@@ -15,6 +15,11 @@ from captioner.transcription.providers.faster_whisper import (
     FasterWhisperVadConfig,
     FasterWhisperWorkerClient,
 )
+from captioner.transcription.providers.nemo import (
+    NemoConfig,
+    NemoTranscriptionService,
+    NemoWorkerClient,
+)
 from captioner.transcription.providers.qwen3 import (
     Qwen3Config,
     Qwen3TranscriptionService,
@@ -56,6 +61,9 @@ __all__ = [
     "FasterWhisperTranscriptionService",
     "FasterWhisperVadConfig",
     "FasterWhisperWorkerClient",
+    "NemoConfig",
+    "NemoTranscriptionService",
+    "NemoWorkerClient",
     "Qwen3Config",
     "Qwen3TranscriptionService",
     "Qwen3WorkerClient",

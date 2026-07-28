@@ -24,6 +24,12 @@ timestamps = "required"
 # dtype = "bfloat16"
 # forced_aligner_model = "Qwen/Qwen3-ForcedAligner-0.6B"
 
+# For NeMo, set provider = "nemo-asr" above and uncomment:
+# [asr.nemo]
+# model = "nvidia/parakeet-tdt-0.6b-v3"
+# device = "cuda"
+# batch_size = 1
+
 [segmentation]
 enabled = true
 batch_tokens = 800

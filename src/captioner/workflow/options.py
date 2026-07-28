@@ -19,7 +19,7 @@ from captioner.media.voice_separation import VoiceSeparationOptions
 from captioner.shared.errors import ConfigurationError
 from captioner.subtitles.glossary import Glossary
 from captioner.subtitles.quality import QualityOptions
-from captioner.transcription.api import FasterWhisperConfig, Qwen3Config
+from captioner.transcription.api import FasterWhisperConfig, NemoConfig, Qwen3Config
 from captioner.transcription.requests import TimestampRequirement
 
 
@@ -94,8 +94,18 @@ class Qwen3AsrOptions(BaseModel):
     qwen3: Qwen3Config = Field(default_factory=Qwen3Config)
 
 
+class NemoAsrOptions(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    provider: Literal["nemo-asr"]
+    language: str = "auto"
+    initial_prompt: str = ""
+    timestamps: TimestampRequirement = TimestampRequirement.REQUIRED
+    nemo: NemoConfig = Field(default_factory=NemoConfig)
+
+
 type AsrOptions = Annotated[
-    FakeAsrOptions | FasterWhisperAsrOptions | Qwen3AsrOptions,
+    FakeAsrOptions | FasterWhisperAsrOptions | Qwen3AsrOptions | NemoAsrOptions,
     Field(discriminator="provider"),
 ]
 

@@ -76,7 +76,10 @@ def _build_parser() -> argparse.ArgumentParser:
 
     doctor = commands.add_parser("doctor", help="check the selected environment")
     doctor.add_argument("--config", type=Path)
-    doctor.add_argument("--provider", choices=("fake", "faster-whisper", "qwen3-asr"))
+    doctor.add_argument(
+        "--provider",
+        choices=("fake", "faster-whisper", "qwen3-asr", "nemo-asr"),
+    )
     doctor.add_argument("--load-model", action="store_true")
     doctor.add_argument("--output-dir", type=Path, default=Path.cwd())
 

@@ -7,7 +7,7 @@ boundaries:
 CLI
   -> Workflow
       -> Media       (audio preparation and optional voice separation)
-      -> Transcription (Fake, Faster Whisper, or Qwen3 blocking Workers)
+      -> Transcription (Fake, Faster Whisper, Qwen3, or NeMo blocking Workers)
       -> Subtitles   (segmentation, correction, translation, QC, refine, export)
           -> LLM contract (Fake or OpenAI-compatible adapter)
       -> Shared
@@ -23,8 +23,8 @@ CLI
 - `src/captioner/llm`: typed LLM contract and deterministic fake implementation.
 - `src/captioner/workflow`: options, temporary workspaces, and the pipeline.
 - `src/captioner/cli`: thin `doctor`/`run`/`transcribe`/`refine` adapters.
-- `workers/common`, `workers/fake`, `workers/faster_whisper`, and `workers/qwen3`:
-  blocking NDJSON Workers.
+- `workers/common`, `workers/fake`, `workers/faster_whisper`,
+  `workers/qwen3`, and `workers/nemo`: blocking NDJSON Workers.
 
 ## Dependency rules
 

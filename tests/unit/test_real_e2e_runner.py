@@ -34,6 +34,27 @@ def test_cuda_linker_failure_switches_provider_to_cpu() -> None:
     assert not _is_cuda_failure("LLM returned invalid JSON")
 
 
+def test_nemo_cpu_fallback_only_changes_provider_device() -> None:
+    options = PipelineOptions.model_validate(
+        {
+            "asr": {
+                "provider": "nemo-asr",
+                "nemo": {
+                    "model": "nvidia/parakeet-tdt-0.6b-v3",
+                    "device": "cuda",
+                    "batch_size": 2,
+                },
+            }
+        }
+    )
+
+    cpu_options = _cpu_options(options)
+
+    assert cpu_options.asr.provider == "nemo-asr"
+    assert cpu_options.asr.nemo.device == "cpu"
+    assert cpu_options.asr.nemo.batch_size == 2
+
+
 def test_record_secret_scan_ignores_only_local_configs(tmp_path: Path) -> None:
     options = PipelineOptions.model_validate(
         {

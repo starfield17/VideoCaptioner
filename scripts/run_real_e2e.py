@@ -13,6 +13,7 @@ from typing import cast
 
 from captioner.workflow.api import (
     FasterWhisperAsrOptions,
+    NemoAsrOptions,
     PipelineOptions,
     Qwen3AsrOptions,
     build_services,
@@ -153,9 +154,7 @@ def _file_summaries(
 ) -> tuple[list[dict[str, object]], list[str]]:
     files: list[dict[str, object]] = []
     violations: list[str] = []
-    expected_origin = (
-        "asr_native" if provider == "faster-whisper" else "forced_alignment"
-    )
+    expected_origin = "forced_alignment" if provider == "qwen3-asr" else "asr_native"
     for item in succeeded:
         subtitle = item.subtitle
         input_path = item.input_path
@@ -239,6 +238,9 @@ def _cpu_options(options: PipelineOptions) -> PipelineOptions:
             update={"device": "cpu", "dtype": "float32"}
         )
         asr = options.asr.model_copy(update={"qwen3": provider_config})
+    elif isinstance(options.asr, NemoAsrOptions):
+        provider_config = options.asr.nemo.model_copy(update={"device": "cpu"})
+        asr = options.asr.model_copy(update={"nemo": provider_config})
     else:
         raise ValueError("CPU fallback requires a real ASR provider")
     return options.model_copy(update={"asr": asr})
@@ -249,6 +251,8 @@ def _device(options: PipelineOptions) -> str:
         return options.asr.faster_whisper.device
     if isinstance(options.asr, Qwen3AsrOptions):
         return options.asr.qwen3.device
+    if isinstance(options.asr, NemoAsrOptions):
+        return options.asr.nemo.device
     return "none"
 
 
@@ -288,6 +292,7 @@ def _prepare_record(record_dir: Path) -> None:
             "lab-packages.txt": "Lab",
             "faster-packages.txt": "captioner-asr-faster-whisper",
             "qwen-packages.txt": "captioner-asr-qwen3",
+            "nemo-packages.txt": "captioner-asr-nemo",
         }
         for filename, environment in environments.items():
             (environment_dir / filename).write_text(
@@ -389,7 +394,7 @@ def _refresh_existing(options: PipelineOptions, record_dir: Path) -> int:
         raise RuntimeError("record does not contain exactly one matching provider")
     run = provider_runs[0]
     expected_origin = (
-        "asr_native" if options.asr.provider == "faster-whisper" else "forced_alignment"
+        "forced_alignment" if options.asr.provider == "qwen3-asr" else "asr_native"
     )
     for attempt in run["attempts"]:
         files = attempt.get("files", [])
