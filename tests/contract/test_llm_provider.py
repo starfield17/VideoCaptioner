@@ -96,6 +96,28 @@ def test_adapter_sends_strict_json_schema_and_parses_boundary_ids() -> None:
     assert "end_ms" not in str(json_schema)
 
 
+def test_adapter_supports_json_object_with_an_explicit_schema() -> None:
+    completions = _FakeCompletions(
+        [_Response([_Choice(_Message('{"break_after":["w1"]}'))])]
+    )
+    adapter = OpenAICompatibleLlm(
+        _config(structured_output_mode="json_object"),
+        client_factory=lambda: _FakeClient(completions),
+    )
+
+    result = adapter.choose_boundaries(
+        (LlmToken(id="w1", text="hello", gap_after_ms=10),)
+    )
+
+    assert result.break_after == ("w1",)
+    request = completions.calls[0]
+    assert request["response_format"] == {"type": "json_object"}
+    messages = cast(list[dict[str, str]], request["messages"])
+    assert '"output_schema"' in messages[1]["content"]
+    assert "start_ms" not in messages[1]["content"]
+    assert "end_ms" not in messages[1]["content"]
+
+
 def test_invalid_structured_output_is_rejected_without_repairing_json() -> None:
     completions = _FakeCompletions(
         [
@@ -109,6 +131,26 @@ def test_invalid_structured_output_is_rejected_without_repairing_json() -> None:
 
     with pytest.raises(StructuredOutputError):
         adapter.choose_boundaries((LlmToken(id="w1", text="hello", gap_after_ms=10),))
+    assert len(completions.calls) == 2
+
+
+def test_empty_json_content_gets_one_format_feedback_retry() -> None:
+    completions = _FakeCompletions(
+        [
+            _Response([_Choice(_Message(""))]),
+            _Response([_Choice(_Message('{"break_after":["w1"]}'))]),
+        ]
+    )
+    adapter = OpenAICompatibleLlm(
+        _config(structured_output_mode="json_object"),
+        client_factory=lambda: _FakeClient(completions),
+    )
+
+    result = adapter.choose_boundaries(
+        (LlmToken(id="w1", text="hello", gap_after_ms=10),)
+    )
+
+    assert result.break_after == ("w1",)
     assert len(completions.calls) == 2
 
 

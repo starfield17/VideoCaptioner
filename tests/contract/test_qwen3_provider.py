@@ -42,6 +42,29 @@ def test_forced_aligner_fixture_preserves_real_item_ranges() -> None:
     assert document.segments[0].word_ids == ("w000001", "w000002")
 
 
+def test_zero_span_aligner_text_merges_without_fabricating_a_range() -> None:
+    document = qwen3_worker.map_qwen3_results(
+        [
+            {
+                "language": "English",
+                "text": "one two three",
+                "time_stamps": [
+                    {"text": "one", "start_time": 0.0, "end_time": 0.2},
+                    {"text": "two", "start_time": 0.2, "end_time": 0.2},
+                    {"text": "three", "start_time": 0.3, "end_time": 0.6},
+                ],
+            }
+        ],
+        language="English",
+        model_name="fixture",
+    )
+
+    assert [(word.text, word.start_ms, word.end_ms) for word in document.words] == [
+        ("one", 0, 200),
+        ("two three", 300, 600),
+    ]
+
+
 def test_no_aligner_does_not_fabricate_word_timing() -> None:
     with pytest.raises(TranscriptionError, match="refusing to fabricate Word timing"):
         qwen3_worker.map_qwen3_results(

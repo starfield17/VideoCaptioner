@@ -15,6 +15,25 @@ def test_defaults_are_strongly_typed() -> None:
     assert options.output.formats[0].value == "srt"
 
 
+def test_direct_llm_secret_is_masked_in_serialized_options() -> None:
+    options = PipelineOptions.model_validate(
+        {
+            "llm": {
+                "provider": "openai-compatible",
+                "api_key": "local-secret",
+                "base_url": "https://api.example.com",
+                "model": "test-model",
+                "structured_output_mode": "json_object",
+            }
+        }
+    )
+
+    dumped = options.model_dump(mode="json")
+
+    assert dumped["llm"]["api_key"] == "**********"
+    assert "local-secret" not in options.model_dump_json()
+
+
 def test_unknown_configuration_fields_are_rejected() -> None:
     with pytest.raises(ValidationError):
         PipelineOptions.model_validate({"run": {"unexpected": True}})

@@ -17,3 +17,12 @@ conda run -n captioner-core python -m captioner run tests/fixtures/fake_input.js
 The fake input format is documented by `tests/fixtures/fake_input.json`. The
 Qwen3 environment and its Python 3.13 Doctor checks are documented in
 `docs/qwen3-python313-compatibility.md`.
+
+## Real E2E audit
+
+`scripts/run_real_e2e.py` runs one configured real ASR provider over a media
+directory and retains sanitized logs, intermediate artifacts, outputs, checksums,
+and a machine-readable summary. Local ignored TOML files may provide an LLM
+`api_key`, `base_url`, and `structured_output_mode`; direct keys are represented
+as `SecretStr` and are masked in run metadata. If a CUDA or shared-library error
+occurs, the runner records that single GPU failure and retries once on CPU.

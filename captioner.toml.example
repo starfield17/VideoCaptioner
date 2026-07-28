@@ -60,9 +60,13 @@ entries = []
 
 [llm]
 provider = "fake"
+# For a local ignored config, direct values can be used instead:
+# api_key = "replace-with-local-key"
+# base_url = "https://api.example.com"
 base_url_env = "CAPTIONER_LLM_BASE_URL"
 api_key_env = "CAPTIONER_LLM_API_KEY"
 model = "your-model-name"
+structured_output_mode = "json_schema"
 timeout_seconds = 120
 max_attempts = 3
 backoff_base_seconds = 0.5

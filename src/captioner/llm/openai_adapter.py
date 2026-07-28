@@ -124,13 +124,16 @@ class OpenAICompatibleLlm:
         payload: Mapping[str, object],
         response_type: type[ModelT],
     ) -> ModelT:
+        request_payload = dict(payload)
+        if self._config.structured_output_mode == "json_object":
+            request_payload["output_schema"] = response_type.model_json_schema()
         messages = (
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": _json_payload(payload)},
+            {"role": "user", "content": _json_payload(request_payload)},
         )
         response = self._request(messages, response_type)
-        raw_content = _response_content(response)
         try:
+            raw_content = _response_content(response)
             return parse_strict_json(raw_content, response_type)
         except StructuredOutputError as first_error:
             feedback_messages = (
@@ -144,8 +147,8 @@ class OpenAICompatibleLlm:
                 },
             )
             feedback_response = self._request(feedback_messages, response_type)
-            feedback_content = _response_content(feedback_response)
             try:
+                feedback_content = _response_content(feedback_response)
                 return parse_strict_json(feedback_content, response_type)
             except StructuredOutputError as second_error:
                 raise second_error from first_error
@@ -161,7 +164,10 @@ class OpenAICompatibleLlm:
                 model=self._config.model,
                 messages=list(messages),
                 temperature=0,
-                response_format=response_format_for(response_type),
+                response_format=response_format_for(
+                    response_type,
+                    self._config.structured_output_mode,
+                ),
             )
 
         try:
@@ -176,15 +182,19 @@ class OpenAICompatibleLlm:
             raise LlmPermanentError(f"LLM request failed: {exc}") from exc
 
     def _build_client(self) -> _Client:
-        api_key = os.getenv(self._config.api_key_env)
+        api_key = (
+            self._config.api_key.get_secret_value()
+            if self._config.api_key is not None
+            else os.getenv(self._config.api_key_env)
+        )
         if not api_key:
             raise LlmAuthenticationError(
-                f"LLM API key environment variable is missing: "
+                "LLM API key is not configured directly or through "
                 f"{self._config.api_key_env}"
             )
         from openai import OpenAI
 
-        base_url = os.getenv(self._config.base_url_env)
+        base_url = self._config.base_url or os.getenv(self._config.base_url_env)
         if base_url:
             return cast(
                 _Client,
@@ -218,8 +228,10 @@ def _response_content(response: object) -> str:
     choice_values = cast(list[object] | tuple[object, ...], choices)
     message = getattr(choice_values[0], "message", None)
     content = getattr(message, "content", None)
-    if not isinstance(content, str) or not content:
+    if not isinstance(content, str):
         raise LlmPermanentError("LLM response contained no text content")
+    if not content.strip():
+        raise StructuredOutputError("LLM response contained empty text content")
     return content
 
 

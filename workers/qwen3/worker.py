@@ -121,6 +121,63 @@ def _result_items(raw_timestamps: object) -> Iterable[object]:
     )
 
 
+def _join_aligned_text(parts: Iterable[str]) -> str:
+    values = tuple(parts)
+    if any(any(_is_cjk(character) for character in value) for value in values):
+        return "".join(values)
+    return " ".join(values)
+
+
+def _is_cjk(character: str) -> bool:
+    codepoint = ord(character)
+    return (
+        0x3000 <= codepoint <= 0x30FF
+        or 0x3400 <= codepoint <= 0x9FFF
+        or 0xF900 <= codepoint <= 0xFAFF
+    )
+
+
+def _aligned_items(raw_timestamps: object) -> tuple[tuple[str, int, int], ...]:
+    """Keep provider ranges and merge zero-span text into a timed neighbor."""
+
+    aligned: list[tuple[str, int, int]] = []
+    pending_text: list[str] = []
+    for raw_item in _result_items(raw_timestamps):
+        item_text = _string(_value(raw_item, "text"), "time_stamps.text")
+        start_seconds = _number(
+            _value(raw_item, "start_time"), "time_stamps.start_time"
+        )
+        end_seconds = _number(_value(raw_item, "end_time"), "time_stamps.end_time")
+        if start_seconds < 0 or end_seconds < 0:
+            raise TranscriptionError("Qwen3 Forced Aligner returned a negative range")
+        if start_seconds > end_seconds:
+            raise TranscriptionError("Qwen3 Forced Aligner returned a reversed range")
+        if start_seconds == end_seconds:
+            pending_text.append(item_text)
+            continue
+        start_ms = _seconds_to_ms(start_seconds, "time_stamps.start_time")
+        end_ms = _seconds_to_ms(end_seconds, "time_stamps.end_time")
+        if start_ms >= end_ms:
+            raise TranscriptionError(
+                "Qwen3 Forced Aligner returned a sub-millisecond range"
+            )
+        text = _join_aligned_text((*pending_text, item_text))
+        pending_text.clear()
+        aligned.append((text, start_ms, end_ms))
+    if pending_text:
+        if not aligned:
+            raise TranscriptionError(
+                "Qwen3 Forced Aligner returned no positive-duration items"
+            )
+        text, start_ms, end_ms = aligned[-1]
+        aligned[-1] = (
+            _join_aligned_text((text, *pending_text)),
+            start_ms,
+            end_ms,
+        )
+    return tuple(aligned)
+
+
 def _raw_results(value: object) -> tuple[object, ...]:
     if isinstance(value, dict) or hasattr(value, "text"):
         return (cast(object, value),)
@@ -184,18 +241,7 @@ def map_qwen3_results(
         raw_timestamps = _value(raw_result, "time_stamps")
         if raw_timestamps is not None:
             word_ids: list[str] = []
-            for raw_item in _result_items(raw_timestamps):
-                item_text = _string(_value(raw_item, "text"), "time_stamps.text")
-                start_ms = _seconds_to_ms(
-                    _value(raw_item, "start_time"), "time_stamps.start_time"
-                )
-                end_ms = _seconds_to_ms(
-                    _value(raw_item, "end_time"), "time_stamps.end_time"
-                )
-                if start_ms >= end_ms:
-                    raise TranscriptionError(
-                        "Qwen3 Forced Aligner returned an invalid item range"
-                    )
+            for item_text, start_ms, end_ms in _aligned_items(raw_timestamps):
                 word_id = f"w{len(words) + 1:06d}"
                 words.append(
                     TimedWord(
