@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "captioner"
+version = "0.1.0"
+description = "Phase 0 clean-room Video Captioner vertical slice"
+requires-python = ">=3.13,<3.14"
+dependencies = ["pydantic>=2,<3"]
+
+[project.scripts]
+captioner = "captioner.cli.main:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src", "."]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 88
+src = ["src", "workers", "scripts", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.pyright]
+include = ["src", "workers", "scripts", "tests"]
+exclude = ["**/__pycache__"]
+pythonVersion = "3.13"
+typeCheckingMode = "strict"
+reportMissingTypeStubs = false
+venvPath = "/home/hazel/miniconda3/envs"
+venv = "captioner-core"

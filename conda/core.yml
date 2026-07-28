@@ -1,0 +1,20 @@
+name: captioner-core
+
+channels:
+  - conda-forge
+
+dependencies:
+  - python=3.13
+  - pip
+  - ffmpeg
+  - pip:
+      - pydantic>=2
+      - typer
+      - rich
+      - openai
+      - httpx
+      - ruff
+      - pyright
+      - pytest
+      - setuptools>=75
+      - -e ..

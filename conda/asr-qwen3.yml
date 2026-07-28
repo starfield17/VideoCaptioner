@@ -1,0 +1,15 @@
+name: captioner-asr-qwen3
+
+channels:
+  - conda-forge
+
+dependencies:
+  - python=3.13
+  - pip
+  - ffmpeg
+  - pip:
+      - torch>=2.6
+      - qwen-asr>=0.0.6
+      - pydantic>=2
+      - setuptools>=75
+      - -e ..

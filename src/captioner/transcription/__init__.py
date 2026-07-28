@@ -1,0 +1,1 @@
+"""Provider-independent transcription contracts."""

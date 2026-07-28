@@ -1,0 +1,39 @@
+{
+  "language": "zh",
+  "model_name": "fake-v1",
+  "segments": [
+    {
+      "id": "seg000001",
+      "text": "这是一个错误句子。",
+      "start_ms": 0,
+      "end_ms": 1700,
+      "words": [
+        {"id": "w000001", "text": "这是", "start_ms": 0, "end_ms": 300},
+        {"id": "w000002", "text": "一个", "start_ms": 320, "end_ms": 700},
+        {"id": "w000003", "text": "错误", "start_ms": 720, "end_ms": 1100},
+        {"id": "w000004", "text": "句子。", "start_ms": 1120, "end_ms": 1700}
+      ]
+    },
+    {
+      "id": "seg000002",
+      "text": "第二句也需要校正。",
+      "start_ms": 2000,
+      "end_ms": 3400,
+      "words": [
+        {"id": "w000005", "text": "第二句", "start_ms": 2000, "end_ms": 2500},
+        {"id": "w000006", "text": "也需要", "start_ms": 2520, "end_ms": 2900},
+        {"id": "w000007", "text": "校正。", "start_ms": 2920, "end_ms": 3400}
+      ]
+    },
+    {
+      "id": "seg000003",
+      "text": "保留原始文本。",
+      "start_ms": 3700,
+      "end_ms": 5000,
+      "words": [
+        {"id": "w000008", "text": "保留", "start_ms": 3700, "end_ms": 4100},
+        {"id": "w000009", "text": "原始文本。", "start_ms": 4120, "end_ms": 5000}
+      ]
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+name: captioner-asr-faster-whisper
+
+channels:
+  - conda-forge
+
+dependencies:
+  - python=3.13
+  - pip
+  - ffmpeg
+  - pip:
+      - faster-whisper>=1.1,<2
+      - pydantic>=2
+      - setuptools>=75
+      - -e ..

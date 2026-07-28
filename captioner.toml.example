@@ -1,0 +1,73 @@
+[run]
+continue_on_error = true
+keep_workdir = false
+
+[audio]
+sample_rate = 16000
+channels = 1
+
+[audio.voice_separation]
+enabled = false
+required = false
+provider = "mdx"
+command_env = "CAPTIONER_VOICE_SEPARATION_COMMAND"
+
+[asr]
+provider = "fake"
+language = "auto"
+timestamps = "required"
+
+# For Qwen3, set provider = "qwen3-asr" above and uncomment:
+# [asr.qwen3]
+# model = "Qwen/Qwen3-ASR-1.7B"
+# device = "cuda:0"
+# dtype = "bfloat16"
+# forced_aligner_model = "Qwen/Qwen3-ForcedAligner-0.6B"
+
+[segmentation]
+enabled = true
+batch_tokens = 800
+parallelism = 4
+
+[correction]
+enabled = true
+batch_size = 30
+parallelism = 8
+
+[translation]
+enabled = true
+target_language = "en"
+batch_size = 30
+parallelism = 16
+allow_partial = true
+
+[repair]
+enabled = true
+batch_size = 20
+parallelism = 8
+
+[subtitle]
+min_duration_ms = 700
+max_duration_ms = 7000
+max_cps = 17.0
+max_line_chars = 42
+max_lines = 2
+max_chars_cjk = 24
+max_words_latin = 14
+
+[glossary]
+entries = []
+
+[llm]
+provider = "fake"
+base_url_env = "CAPTIONER_LLM_BASE_URL"
+api_key_env = "CAPTIONER_LLM_API_KEY"
+model = "your-model-name"
+timeout_seconds = 120
+max_attempts = 3
+backoff_base_seconds = 0.5
+backoff_max_seconds = 8
+
+[output]
+formats = ["srt", "json"]
+bilingual = true

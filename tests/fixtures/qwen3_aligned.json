@@ -1,0 +1,10 @@
+[
+  {
+    "language": "Chinese",
+    "text": "今天下雨",
+    "time_stamps": [
+      {"text": "今天", "start_time": 0.125, "end_time": 0.610},
+      {"text": "下雨", "start_time": 0.720, "end_time": 1.305}
+    ]
+  }
+]

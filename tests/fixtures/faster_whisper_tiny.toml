@@ -1,0 +1,19 @@
+[run]
+continue_on_error = true
+keep_workdir = true
+
+[asr]
+provider = "faster-whisper"
+language = "auto"
+timestamps = "required"
+
+[asr.faster_whisper]
+model = "tiny"
+device = "cpu"
+compute_type = "int8"
+
+[correction]
+enabled = false
+
+[translation]
+enabled = false

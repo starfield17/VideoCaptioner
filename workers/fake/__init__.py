@@ -1,0 +1,1 @@
+"""Deterministic Fake ASR worker."""

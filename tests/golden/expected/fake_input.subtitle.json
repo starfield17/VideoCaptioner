@@ -1,0 +1,49 @@
+{
+  "schema_version": "subtitle.v1",
+  "source_language": "zh",
+  "target_language": "en",
+  "cues": [
+    {
+      "id": "cue000001",
+      "start_ms": 0,
+      "end_ms": 1700,
+      "source_text": "这是一个错误句子。",
+      "corrected_text": "这是一个正确句子。",
+      "translated_text": "[en] 这是一个正确句子。",
+      "source_word_ids": [
+        "w000001",
+        "w000002",
+        "w000003",
+        "w000004"
+      ],
+      "warnings": []
+    },
+    {
+      "id": "cue000002",
+      "start_ms": 2000,
+      "end_ms": 3400,
+      "source_text": "第二句也需要校正。",
+      "corrected_text": "第二句也需要校正。",
+      "translated_text": "[en] 第二句也需要校正。",
+      "source_word_ids": [
+        "w000005",
+        "w000006",
+        "w000007"
+      ],
+      "warnings": []
+    },
+    {
+      "id": "cue000003",
+      "start_ms": 3700,
+      "end_ms": 5000,
+      "source_text": "保留原始文本。",
+      "corrected_text": "保留原始文本。",
+      "translated_text": "[en] 保留原始文本。",
+      "source_word_ids": [
+        "w000008",
+        "w000009"
+      ],
+      "warnings": []
+    }
+  ]
+}
