@@ -123,8 +123,11 @@ def test_windows_runtime_command_uses_prefix_python(tmp_path: Path) -> None:
 
     command = store.command("faster-whisper")
 
-    assert command is not None
-    assert str(target / "env/python.exe") in command
+    assert command == (
+        str(target / "env/python.exe"),
+        "-m",
+        descriptor.worker_module,
+    )
 
 
 def test_failed_probe_keeps_existing_runtime_and_removes_staging(

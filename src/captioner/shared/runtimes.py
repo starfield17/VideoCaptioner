@@ -259,18 +259,12 @@ class RuntimeStore:
         if status.path is None:
             return None
         micromamba = self._find_micromamba()
-        python = self._python_executable(
-            status.path / "env",
-            status.descriptor,
-        )
         return (
-            str(micromamba),
-            "run",
-            "--root-prefix",
-            str(self.root / "_micromamba"),
-            "--prefix",
-            str(status.path / "env"),
-            str(python),
+            *self._python_command(
+                micromamba,
+                status.path / "env",
+                status.descriptor,
+            ),
             "-m",
             status.descriptor.worker_module,
         )
@@ -322,13 +316,7 @@ class RuntimeStore:
             )
             selected_checkpoint()
             install = (
-                str(micromamba),
-                "run",
-                "--root-prefix",
-                str(self.root / "_micromamba"),
-                "--prefix",
-                str(env_path),
-                str(self._python_executable(env_path, descriptor)),
+                *self._python_command(micromamba, env_path, descriptor),
                 "-m",
                 "pip",
                 "install",
@@ -445,13 +433,7 @@ class RuntimeStore:
         checkpoint: Checkpoint,
     ) -> None:
         command = (
-            str(micromamba),
-            "run",
-            "--root-prefix",
-            str(self.root / "_micromamba"),
-            "--prefix",
-            str(env_path),
-            str(self._python_executable(env_path, descriptor)),
+            *self._python_command(micromamba, env_path, descriptor),
             "-m",
             descriptor.worker_module,
         )
@@ -504,6 +486,25 @@ class RuntimeStore:
         if descriptor.conda_platform.startswith("win-"):
             return env_path / "python.exe"
         return env_path / "bin" / "python"
+
+    def _python_command(
+        self,
+        micromamba: Path,
+        env_path: Path,
+        descriptor: RuntimeDescriptor,
+    ) -> tuple[str, ...]:
+        python = self._python_executable(env_path, descriptor)
+        if descriptor.conda_platform.startswith("win-"):
+            return (str(python),)
+        return (
+            str(micromamba),
+            "run",
+            "--root-prefix",
+            str(self.root / "_micromamba"),
+            "--prefix",
+            str(env_path),
+            str(python),
+        )
 
     @staticmethod
     def _write_pointer(parent: Path, target_name: str) -> None:
