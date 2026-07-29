@@ -259,6 +259,10 @@ class RuntimeStore:
         if status.path is None:
             return None
         micromamba = self._find_micromamba()
+        python = self._python_executable(
+            status.path / "env",
+            status.descriptor,
+        )
         return (
             str(micromamba),
             "run",
@@ -266,7 +270,7 @@ class RuntimeStore:
             str(self.root / "_micromamba"),
             "--prefix",
             str(status.path / "env"),
-            "python",
+            str(python),
             "-m",
             status.descriptor.worker_module,
         )
@@ -324,7 +328,7 @@ class RuntimeStore:
                 str(self.root / "_micromamba"),
                 "--prefix",
                 str(env_path),
-                "python",
+                str(self._python_executable(env_path, descriptor)),
                 "-m",
                 "pip",
                 "install",
@@ -447,7 +451,7 @@ class RuntimeStore:
             str(self.root / "_micromamba"),
             "--prefix",
             str(env_path),
-            "python",
+            str(self._python_executable(env_path, descriptor)),
             "-m",
             descriptor.worker_module,
         )
@@ -483,11 +487,7 @@ class RuntimeStore:
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             return False
-        python_path = (
-            path / "env" / "python.exe"
-            if descriptor.conda_platform.startswith("win-")
-            else path / "env" / "bin" / "python"
-        )
+        python_path = RuntimeStore._python_executable(path / "env", descriptor)
         return bool(
             python_path.is_file()
             and manifest.get("schema_version") == RUNTIME_SCHEMA_VERSION
@@ -495,6 +495,15 @@ class RuntimeStore:
             and manifest.get("protocol_version") == PROTOCOL_VERSION
             and manifest.get("recipe_sha256") == descriptor.recipe_sha256
         )
+
+    @staticmethod
+    def _python_executable(
+        env_path: Path,
+        descriptor: RuntimeDescriptor,
+    ) -> Path:
+        if descriptor.conda_platform.startswith("win-"):
+            return env_path / "python.exe"
+        return env_path / "bin" / "python"
 
     @staticmethod
     def _write_pointer(parent: Path, target_name: str) -> None:

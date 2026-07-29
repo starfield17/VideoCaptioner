@@ -89,7 +89,42 @@ def test_runtime_install_updates_pointer_only_after_probe(tmp_path: Path) -> Non
     assert manifest["schema_version"] == "captioner-runtime.v1"
     assert manifest["recipe_sha256"] == status.descriptor.recipe_sha256
     assert any("pip" in call for call in calls)
+    assert any(str(status.path / "env/bin/python") in call for call in calls)
     assert store.command("faster-whisper") is not None
+
+
+def test_windows_runtime_command_uses_prefix_python(tmp_path: Path) -> None:
+    platform = RuntimePlatform("windows", "x86_64", "win-64")
+    descriptor = runtime_descriptor("faster-whisper", runtime_platform=platform)
+    micromamba = tmp_path / "micromamba.exe"
+    micromamba.touch()
+    target = tmp_path / "faster-whisper/windows-x86_64/1-fixture"
+    (target / "env").mkdir(parents=True)
+    (target / "env/python.exe").touch()
+    (target / "captioner-runtime.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "captioner-runtime.v1",
+                "provider": descriptor.provider,
+                "protocol_version": descriptor.protocol_version,
+                "recipe_sha256": descriptor.recipe_sha256,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (target.parent / "current.json").write_text(
+        '{"path":"1-fixture"}', encoding="utf-8"
+    )
+    store = RuntimeStore(
+        tmp_path,
+        micromamba=micromamba,
+        runtime_platform=platform,
+    )
+
+    command = store.command("faster-whisper")
+
+    assert command is not None
+    assert str(target / "env/python.exe") in command
 
 
 def test_failed_probe_keeps_existing_runtime_and_removes_staging(
