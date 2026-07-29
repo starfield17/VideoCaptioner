@@ -26,7 +26,13 @@ def main() -> int:
         temporary = Path(temp)
         environment = os.environ.copy()
         environment.pop("PYTHONPATH", None)
-        environment["PATH"] = os.pathsep.join((str(directory), os.defpath))
+        path_entries = [str(directory)]
+        if os.name == "nt":
+            system_root = Path(environment.get("SystemRoot", r"C:\Windows"))
+            path_entries.extend((str(system_root / "System32"), str(system_root)))
+        else:
+            path_entries.append(os.defpath)
+        environment["PATH"] = os.pathsep.join(path_entries)
         environment["XDG_CONFIG_HOME"] = str(temporary / "config")
         environment["XDG_CACHE_HOME"] = str(temporary / "cache")
         environment["XDG_DATA_HOME"] = str(temporary / "data")
