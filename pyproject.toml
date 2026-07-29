@@ -53,5 +53,3 @@ exclude = ["**/__pycache__"]
 pythonVersion = "3.13"
 typeCheckingMode = "strict"
 reportMissingTypeStubs = false
-venvPath = "/home/hazel/miniconda3/envs"
-venv = "Lab"
