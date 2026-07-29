@@ -13,6 +13,7 @@ from captioner.models import (
 from captioner.shared.app_paths import ApplicationPaths, application_paths
 from captioner.shared.errors import ConfigurationError
 from captioner.shared.logging import LogLevel, configure_logging, log_extra
+from captioner.shared.runtimes import RuntimeStatus, RuntimeStore
 from captioner.workflow.doctor import DoctorReport, run_doctor
 from captioner.workflow.model_preparation import prepare_asr_model
 from captioner.workflow.models import RunResult, TranscriptionRunResult
@@ -252,6 +253,49 @@ def download_model(
     return paths
 
 
+def list_runtimes() -> tuple[RuntimeStatus, ...]:
+    return RuntimeStore().list()
+
+
+def get_runtime_status(provider: str) -> RuntimeStatus:
+    return RuntimeStore().status(provider)
+
+
+def install_runtime(
+    provider: str,
+    *,
+    repair: bool = False,
+    context: ExecutionContext | None = None,
+) -> RuntimeStatus:
+    selected = execution_context(context)
+    selected.checkpoint()
+    selected.emit(
+        ProgressEvent(
+            ProgressKind.STAGE_STARTED,
+            stage=ProgressStage.RUNTIME_INSTALL,
+            message=provider,
+        )
+    )
+    result = RuntimeStore().install(
+        provider,
+        repair=repair,
+        checkpoint=selected.checkpoint,
+    )
+    selected.checkpoint()
+    selected.emit(
+        ProgressEvent(
+            ProgressKind.STAGE_COMPLETED,
+            stage=ProgressStage.RUNTIME_INSTALL,
+            message=provider,
+        )
+    )
+    return result
+
+
+def remove_runtime(provider: str) -> RuntimeStatus:
+    return RuntimeStore().remove(provider)
+
+
 def _prepare_options(
     options: PipelineOptions,
     context: ExecutionContext,
@@ -339,7 +383,11 @@ __all__ = [
     "execute_run",
     "execute_transcribe",
     "get_application_paths",
+    "get_runtime_status",
+    "install_runtime",
     "list_models",
+    "list_runtimes",
     "plan_operation",
+    "remove_runtime",
     "resolve_options",
 ]

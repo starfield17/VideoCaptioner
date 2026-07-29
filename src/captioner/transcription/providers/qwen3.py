@@ -1,12 +1,12 @@
 """Qwen3 ASR provider configuration, Worker client, and service adapter."""
 
-import shutil
 from pathlib import Path
 from typing import Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from captioner.shared.errors import ProviderUnavailableError, TranscriptionError
+from captioner.shared.runtimes import resolve_worker_command
 from captioner.transcription.capabilities import AsrCapabilities
 from captioner.transcription.models import TranscriptDocument
 from captioner.transcription.providers.worker_client import NdjsonWorkerClient
@@ -79,25 +79,14 @@ class Qwen3WorkerClient:
     def _get_client(self) -> NdjsonWorkerClient:
         if self._client is not None:
             raise ProviderUnavailableError("Qwen3 ASR Worker client is already started")
-        command = self._command or self._conda_command()
+        command = self._command or resolve_worker_command(
+            "qwen3-asr",
+            environment_name=self._environment_name,
+            worker_module="workers.qwen3",
+        )
         return NdjsonWorkerClient(
             command=command,
             expected_provider_id="qwen3-asr",
-        )
-
-    def _conda_command(self) -> tuple[str, ...]:
-        conda = shutil.which("conda")
-        if conda is None:
-            raise ProviderUnavailableError("Conda is required for Qwen3 ASR")
-        return (
-            conda,
-            "run",
-            "--no-capture-output",
-            "-n",
-            self._environment_name,
-            "python",
-            "-m",
-            "workers.qwen3",
         )
 
 

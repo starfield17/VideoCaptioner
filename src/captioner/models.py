@@ -33,6 +33,13 @@ MODEL_CATALOG = (
         ("model.bin",),
     ),
     ModelDescriptor(
+        "faster-whisper-tiny",
+        "faster-whisper",
+        "Systran/faster-whisper-tiny",
+        "Small test/development model; not selected for production by default.",
+        ("model.bin",),
+    ),
+    ModelDescriptor(
         "faster-whisper-small",
         "faster-whisper",
         "Systran/faster-whisper-small",

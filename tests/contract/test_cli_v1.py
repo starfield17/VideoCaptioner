@@ -103,3 +103,19 @@ def test_models_path_uses_versioned_json(capsys: CaptureFixture[str]) -> None:
     payload = json.loads(capsys.readouterr().out)
     assert payload["schema_version"] == "cli.v1"
     assert payload["command"] == "models"
+
+
+def test_runtimes_list_exposes_support_and_process_arch(
+    capsys: CaptureFixture[str],
+) -> None:
+    assert main(("runtimes", "list")) == 0
+    payload = json.loads(capsys.readouterr().out)
+
+    assert payload["schema_version"] == "cli.v1"
+    assert payload["command"] == "runtimes"
+    assert [item["provider"] for item in payload["runtimes"]] == [
+        "faster-whisper",
+        "qwen3-asr",
+        "nemo-asr",
+    ]
+    assert all("process_arch" in item for item in payload["runtimes"])

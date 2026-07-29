@@ -45,8 +45,10 @@ from captioner.workflow.api import (
     ProgressEvent,
     RefineResult,
     RunResult,
+    RuntimeStatus,
     TranscriptionRunResult,
     get_application_paths,
+    get_runtime_status,
     load_options,
     plan_operation,
     save_options,
@@ -178,6 +180,11 @@ class MainWindow(QMainWindow):
         self.doctor_dialog = DoctorDialog(self)
         self.models_dialog.refresh_button.clicked.connect(self._refresh_models)
         self.models_dialog.download_button.clicked.connect(self._download_model)
+        self.models_dialog.install_runtime_button.clicked.connect(self._install_runtime)
+        self.models_dialog.repair_runtime_button.clicked.connect(
+            lambda: self._install_runtime(repair=True)
+        )
+        self.models_dialog.remove_runtime_button.clicked.connect(self._remove_runtime)
         self.doctor_dialog.run_button.clicked.connect(self._run_doctor)
         self.run_page.input_path.textChanged.connect(self._invalidate_plan)
         self.run_page.output_button.clicked.connect(self._select_output)
@@ -268,6 +275,37 @@ class MainWindow(QMainWindow):
     def _confirm_and_launch(
         self, plan: ApplicationPlan, options: PipelineOptions
     ) -> None:
+        if plan.provider != "fake":
+            runtime = get_runtime_status(plan.provider)
+            if not runtime.installed:
+                if not runtime.descriptor.available:
+                    QMessageBox.warning(
+                        self,
+                        tr("Runtime unavailable"),
+                        runtime.detail,
+                    )
+                    return
+                answer = QMessageBox.question(
+                    self,
+                    tr("Install runtime"),
+                    (
+                        f"{plan.provider} {tr('runtime is not installed.')} "
+                        f"[{runtime.descriptor.stability.value}]\n\n"
+                        f"{runtime.descriptor.reason}\n\n"
+                        f"{tr('Install it now?')}"
+                    ),
+                )
+                if answer != QMessageBox.StandardButton.Yes:
+                    return
+                self._after_job = lambda: self._confirm_and_launch(plan, options)
+                self._start_job(
+                    JobSpec(
+                        kind="runtime_install",
+                        options=options,
+                        runtime_provider=plan.provider,
+                    )
+                )
+                return
         if self._setting_bool("confirm_before_run", True):
             stages = tuple(
                 name
@@ -351,6 +389,59 @@ class MainWindow(QMainWindow):
             return
         self._start_job(JobSpec(kind="download", options=options, model_key=key))
 
+    def _install_runtime(self, *, repair: bool = False) -> None:
+        runtime = self.models_dialog.page.selected_runtime()
+        if runtime is None:
+            QMessageBox.information(self, tr("Runtimes"), tr("Select a runtime first."))
+            return
+        if not runtime.descriptor.available:
+            QMessageBox.warning(
+                self, tr("Runtime unavailable"), runtime.descriptor.reason
+            )
+            return
+        action = tr("Repair runtime") if repair else tr("Install runtime")
+        answer = QMessageBox.question(
+            self,
+            action,
+            (
+                f"{action}: {runtime.descriptor.provider}?\n\n"
+                f"[{runtime.descriptor.stability.value}] "
+                f"{runtime.descriptor.reason}"
+            ),
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        self._start_job(
+            JobSpec(
+                kind="runtime_repair" if repair else "runtime_install",
+                options=self._current_options(),
+                runtime_provider=runtime.descriptor.provider,
+            )
+        )
+
+    def _remove_runtime(self) -> None:
+        runtime = self.models_dialog.page.selected_runtime()
+        if runtime is None or not runtime.installed:
+            QMessageBox.information(
+                self, tr("Runtimes"), tr("Select an installed runtime first.")
+            )
+            return
+        answer = QMessageBox.warning(
+            self,
+            tr("Remove runtime"),
+            f"{tr('Remove runtime')} {runtime.descriptor.provider}?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        self._start_job(
+            JobSpec(
+                kind="runtime_remove",
+                options=self._current_options(),
+                runtime_provider=runtime.descriptor.provider,
+            )
+        )
+
     def _start_job(self, spec: JobSpec) -> None:
         if self._busy:
             return
@@ -408,6 +499,15 @@ class MainWindow(QMainWindow):
                 self.doctor_dialog,
                 tr("Diagnostics"),
                 tr("Diagnostics complete."),
+            )
+            return
+        if isinstance(result, RuntimeStatus):
+            self.models_dialog.page.refresh(self._options)
+            self.status.setText(tr("Runtime operation complete"))
+            QMessageBox.information(
+                self.models_dialog,
+                tr("Runtimes"),
+                f"{result.descriptor.provider}: {result.detail}",
             )
             return
         if isinstance(result, dict):
@@ -519,6 +619,9 @@ class MainWindow(QMainWindow):
         self.run_page.output_button.setEnabled(not busy)
         self.models_dialog.refresh_button.setEnabled(not busy)
         self.models_dialog.download_button.setEnabled(not busy)
+        self.models_dialog.install_runtime_button.setEnabled(not busy)
+        self.models_dialog.repair_runtime_button.setEnabled(not busy)
+        self.models_dialog.remove_runtime_button.setEnabled(not busy)
         self.doctor_dialog.run_button.setEnabled(not busy)
 
     def _update_elapsed(self) -> None:

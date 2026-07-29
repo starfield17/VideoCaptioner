@@ -1,10 +1,10 @@
 """FFmpeg-backed audio preparation for the real ASR provider."""
 
-import shutil
 import subprocess
 from pathlib import Path
 
 from captioner.media.models import AudioAsset
+from captioner.shared.app_paths import bundled_executable
 from captioner.shared.errors import MediaPreparationError
 
 
@@ -19,7 +19,7 @@ class FfmpegMediaService:
     ) -> None:
         self._sample_rate = sample_rate
         self._channels = channels
-        self._ffmpeg = ffmpeg_binary or shutil.which("ffmpeg")
+        self._ffmpeg = ffmpeg_binary or bundled_executable("ffmpeg")
 
     def prepare_audio(self, input_path: Path, output_dir: Path) -> AudioAsset:
         if not input_path.is_file():

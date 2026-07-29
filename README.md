@@ -10,11 +10,11 @@ the selection evidence and acceptance rule.
 No file is written when the default config is absent. `captioner config init`
 creates it explicitly. Platform-native defaults are:
 
-| Platform | Config | Models | Logs |
-| --- | --- | --- | --- |
-| Linux | `~/.config/VideoCaptioner/config.toml` | `~/.cache/VideoCaptioner/models` | `~/.local/state/VideoCaptioner/log` |
-| macOS | `~/Library/Application Support/VideoCaptioner/config.toml` | `~/Library/Caches/VideoCaptioner/models` | `~/Library/Logs/VideoCaptioner` |
-| Windows | `%LOCALAPPDATA%\\VideoCaptioner\\config.toml` | `%LOCALAPPDATA%\\VideoCaptioner\\Cache\\models` | `%LOCALAPPDATA%\\VideoCaptioner\\Logs` |
+| Platform | Config | Models | Runtimes | Logs |
+| --- | --- | --- | --- | --- |
+| Linux | `~/.config/VideoCaptioner/config.toml` | `~/.cache/VideoCaptioner/models` | `~/.local/share/VideoCaptioner/runtimes` | `~/.local/state/VideoCaptioner/log` |
+| macOS | `~/Library/Application Support/VideoCaptioner/config.toml` | `~/Library/Caches/VideoCaptioner/models` | `~/Library/Application Support/VideoCaptioner/runtimes` | `~/Library/Logs/VideoCaptioner` |
+| Windows | `%LOCALAPPDATA%\\VideoCaptioner\\config.toml` | `%LOCALAPPDATA%\\VideoCaptioner\\Cache\\models` | `%LOCALAPPDATA%\\VideoCaptioner\\runtimes` | `%LOCALAPPDATA%\\VideoCaptioner\\Logs` |
 
 The built-in LLM stage defaults are correction 30 items / 8 workers,
 translation 30 / 16, and repair 20 / 8. Rotating JSONL logs default to `INFO`,
@@ -47,6 +47,29 @@ existing-subtitle refine runs; recursive file/folder drag-and-drop; Light and
 Dark themes; shared settings; model inspection/downloads; Doctor diagnostics;
 progress and cooperative cancellation. It uses the same Workflow/Application
 API and configuration as the CLI. See [GUI usage and testing](docs/gui.md).
+
+## Managed runtimes and native releases
+
+Native desktop archives include the application, FFmpeg, and micromamba, but
+not multi-gigabyte ASR frameworks or model weights. A target computer does not
+need Python or Conda. Install a provider runtime from the GUI Models →
+Runtimes tab, or use:
+
+```text
+captioner runtimes list
+captioner runtimes install faster-whisper
+captioner runtimes repair faster-whisper
+captioner runtimes remove faster-whisper
+```
+
+Runtime environments are isolated under the platform data directory; model
+weights remain in the model cache shown by `captioner models path`. Faster
+Whisper is the stable portable runtime. Qwen3 recipes are experimental. NeMo is
+disabled outside Linux with an explicit reason.
+
+Tagging `v<pyproject version>` starts the six-platform GitHub Release workflow.
+See [native releases](docs/releasing.md) for artifact names, local packaging,
+signing secrets, and runtime support boundaries.
 
 The fake input format is documented by `tests/fixtures/fake_input.json`. The
 Qwen3 environment and its Python 3.13 Doctor checks are documented in

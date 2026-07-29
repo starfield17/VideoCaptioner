@@ -1,11 +1,11 @@
 """Faster Whisper provider configuration and Worker client."""
 
-import shutil
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from captioner.shared.errors import ProviderUnavailableError
+from captioner.shared.runtimes import resolve_worker_command
 from captioner.transcription.capabilities import AsrCapabilities
 from captioner.transcription.models import TranscriptDocument
 from captioner.transcription.providers.worker_client import NdjsonWorkerClient
@@ -86,25 +86,14 @@ class FasterWhisperWorkerClient:
             raise ProviderUnavailableError(
                 "Faster Whisper worker client is already started"
             )
-        command = self._command or self._conda_command()
+        command = self._command or resolve_worker_command(
+            "faster-whisper",
+            environment_name=self._environment_name,
+            worker_module="workers.faster_whisper",
+        )
         return NdjsonWorkerClient(
             command=command,
             expected_provider_id="faster-whisper",
-        )
-
-    def _conda_command(self) -> tuple[str, ...]:
-        conda = shutil.which("conda")
-        if conda is None:
-            raise ProviderUnavailableError("Conda is required for Faster Whisper")
-        return (
-            conda,
-            "run",
-            "--no-capture-output",
-            "-n",
-            self._environment_name,
-            "python",
-            "-m",
-            "workers.faster_whisper",
         )
 
 

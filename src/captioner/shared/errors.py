@@ -21,6 +21,10 @@ class ProviderUnavailableError(CaptionerError):
     """The selected ASR provider could not be started."""
 
 
+class RuntimeInstallationError(CaptionerError):
+    """A managed ASR runtime could not be installed or repaired."""
+
+
 class TranscriptionError(CaptionerError):
     """The ASR worker returned an invalid or failed result."""
 

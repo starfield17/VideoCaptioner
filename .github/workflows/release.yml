@@ -1,0 +1,277 @@
+name: Native release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548
+        with:
+          python-version: "3.13"
+      - run: python -m pip install -e ".[gui-test]" ruff pyright pytest
+      - run: python scripts/verify.py
+        env:
+          QT_QPA_PLATFORM: offscreen
+      - run: python scripts/release_metadata.py version --ref "${{ github.ref }}"
+
+  build:
+    needs: verify
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            os_name: linux
+            setup_arch: x64
+            asset_arch: x86_64
+          - runner: ubuntu-24.04-arm
+            os_name: linux
+            setup_arch: arm64
+            asset_arch: aarch64
+          - runner: macos-15-intel
+            os_name: macos
+            setup_arch: x64
+            asset_arch: x86_64
+          - runner: macos-15
+            os_name: macos
+            setup_arch: arm64
+            asset_arch: aarch64
+          - runner: windows-2025
+            os_name: windows
+            setup_arch: x64
+            asset_arch: x86_64
+            inno_arch: x64compatible
+          - runner: windows-11-arm
+            os_name: windows
+            setup_arch: arm64
+            asset_arch: aarch64
+            inno_arch: arm64
+    runs-on: ${{ matrix.runner }}
+    env:
+      QT_QPA_PLATFORM: offscreen
+      APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+      APPLE_NOTARY_KEY: ${{ secrets.APPLE_NOTARY_KEY }}
+      APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+      APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+      WINDOWS_CERTIFICATE_PFX: ${{ secrets.WINDOWS_CERTIFICATE_PFX }}
+      WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548
+        with:
+          python-version: "3.13"
+          architecture: ${{ matrix.setup_arch }}
+      - name: Install Linux GUI libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0 \
+            libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
+            libxcb-render-util0 libxcb-xkb1 zstd
+      - name: Install build dependencies
+        run: >-
+          python -m pip install
+          "PySide6==6.11.1"
+          "PyInstaller==6.21.0"
+          "Pillow>=11,<13"
+          "build>=1,<2"
+          "setuptools>=75"
+          -e .
+      - name: Build and smoke frozen application
+        run: python scripts/build_release.py
+      - name: Stable managed runtime smoke
+        run: python scripts/smoke_managed_runtime.py --directory dist/VideoCaptioner
+
+      - name: Prepare Linux archive
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          version="$(python scripts/release_metadata.py version)"
+          mkdir -p release-assets
+          tar --zstd -cf \
+            "release-assets/VideoCaptioner-v${version}-linux-${{ matrix.asset_arch }}.tar.zst" \
+            -C dist VideoCaptioner
+
+      - name: Configure Apple signing
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          if [[ -n "$APPLE_CERTIFICATE_P12" && -n "$APPLE_CERTIFICATE_PASSWORD" \
+            && -n "$APPLE_SIGNING_IDENTITY" && -n "$APPLE_NOTARY_KEY" \
+            && -n "$APPLE_NOTARY_KEY_ID" && -n "$APPLE_NOTARY_ISSUER_ID" ]]; then
+            echo "SIGN_SUFFIX=" >> "$GITHUB_ENV"
+            echo "APPLE_SIGNED=true" >> "$GITHUB_ENV"
+            security create-keychain -p temporary build.keychain
+            security default-keychain -s build.keychain
+            security unlock-keychain -p temporary build.keychain
+            echo "$APPLE_CERTIFICATE_P12" | base64 --decode > certificate.p12
+            security import certificate.p12 -k build.keychain \
+              -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+            security set-key-partition-list -S apple-tool:,apple: \
+              -s -k temporary build.keychain
+            find dist/VideoCaptioner.app/Contents -type f -perm -111 -print0 |
+              xargs -0 -I{} codesign --force --options runtime \
+                --timestamp --sign "$APPLE_SIGNING_IDENTITY" "{}"
+            codesign --force --options runtime --timestamp \
+              --sign "$APPLE_SIGNING_IDENTITY" dist/VideoCaptioner.app
+          else
+            echo "SIGN_SUFFIX=-unsigned" >> "$GITHUB_ENV"
+            echo "APPLE_SIGNED=false" >> "$GITHUB_ENV"
+          fi
+
+      - name: Notarize signed macOS app
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          if [[ "$APPLE_SIGNED" == "true" ]]; then
+            echo "$APPLE_NOTARY_KEY" | base64 --decode > AuthKey.p8
+            ditto -c -k --keepParent dist/VideoCaptioner.app notarization.zip
+            xcrun notarytool submit notarization.zip --wait \
+              --key AuthKey.p8 --key-id "$APPLE_NOTARY_KEY_ID" \
+              --issuer "$APPLE_NOTARY_ISSUER_ID"
+            xcrun stapler staple dist/VideoCaptioner.app
+          fi
+
+      - name: Prepare macOS archives
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          version="$(python scripts/release_metadata.py version)"
+          base="VideoCaptioner-v${version}-macos-${{ matrix.asset_arch }}${SIGN_SUFFIX}"
+          mkdir -p release-assets dmg-root
+          ditto -c -k --sequesterRsrc --keepParent \
+            dist/VideoCaptioner.app "release-assets/${base}.app.zip"
+          ditto dist/VideoCaptioner.app dmg-root/VideoCaptioner.app
+          ln -s /Applications dmg-root/Applications
+          hdiutil create -volname VideoCaptioner -srcfolder dmg-root \
+            -ov -format UDZO "release-assets/${base}.dmg"
+          if [[ "$APPLE_SIGNED" == "true" ]]; then
+            xcrun notarytool submit "release-assets/${base}.dmg" --wait \
+              --key AuthKey.p8 --key-id "$APPLE_NOTARY_KEY_ID" \
+              --issuer "$APPLE_NOTARY_ISSUER_ID"
+            xcrun stapler staple "release-assets/${base}.dmg"
+          fi
+
+      - name: Install Inno Setup
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $url = "https://github.com/jrsoftware/issrc/releases/download/is-6_7_0/innosetup-6.7.0.exe"
+          Invoke-WebRequest $url -OutFile inno.exe
+          $actual = (Get-FileHash inno.exe -Algorithm SHA256).Hash.ToLower()
+          if ($actual -ne "f45c7d68d1e660cf13877ec36738a5179ce72a33414f9959d35e99b68c52a697") {
+            throw "Inno Setup checksum mismatch"
+          }
+          Start-Process .\inno.exe -Wait -ArgumentList @(
+            "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART",
+            "/DIR=$PWD\inno"
+          )
+
+      - name: Configure and apply Windows signing
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if ($env:WINDOWS_CERTIFICATE_PFX -and $env:WINDOWS_CERTIFICATE_PASSWORD) {
+            "SIGN_SUFFIX=" | Out-File $env:GITHUB_ENV -Append
+            "WINDOWS_SIGNED=true" | Out-File $env:GITHUB_ENV -Append
+            [IO.File]::WriteAllBytes(
+              "$PWD\certificate.pfx",
+              [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_PFX)
+            )
+            $signTool = (Get-Command signtool.exe -ErrorAction Stop).Source
+            "SIGNTOOL=$signTool" | Out-File $env:GITHUB_ENV -Append
+            foreach ($name in @("VideoCaptioner.exe", "captioner.exe", "captioner-worker-fake.exe")) {
+              & $signTool sign /f certificate.pfx /p $env:WINDOWS_CERTIFICATE_PASSWORD `
+                /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 `
+                "dist\VideoCaptioner\$name"
+            }
+          } else {
+            "SIGN_SUFFIX=-unsigned" | Out-File $env:GITHUB_ENV -Append
+            "WINDOWS_SIGNED=false" | Out-File $env:GITHUB_ENV -Append
+          }
+
+      - name: Build Windows installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $version = python scripts/release_metadata.py version
+          New-Item release-assets -ItemType Directory -Force | Out-Null
+          & "$PWD\inno\ISCC.exe" `
+            "/DAppVersion=$version" `
+            "/DSourceDir=$PWD\dist\VideoCaptioner" `
+            "/DOutputDir=$PWD\release-assets" `
+            "/DTargetArch=${{ matrix.inno_arch }}" `
+            "/DAssetArch=${{ matrix.asset_arch }}" `
+            "/DNameSuffix=$env:SIGN_SUFFIX" `
+            packaging\windows\VideoCaptioner.iss
+          if ($env:WINDOWS_SIGNED -eq "true") {
+            $installer = Get-ChildItem release-assets\*.exe
+            & $env:SIGNTOOL sign /f certificate.pfx `
+              /p $env:WINDOWS_CERTIFICATE_PASSWORD /fd SHA256 `
+              /tr http://timestamp.digicert.com /td SHA256 $installer.FullName
+          }
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: release-${{ matrix.os_name }}-${{ matrix.asset_arch }}
+          path: release-assets/*
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548
+        with:
+          python-version: "3.13"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: release-*
+          path: release-assets
+          merge-multiple: true
+      - name: Generate SBOM and release manifest
+        run: |
+          python -m pip install . cyclonedx-bom
+          version="$(python scripts/release_metadata.py version --ref "${{ github.ref }}")"
+          cyclonedx-py environment --output-file \
+            "release-assets/VideoCaptioner-v${version}-sbom.json"
+          python scripts/release_metadata.py finalize release-assets --version "$version"
+      - uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a
+        with:
+          subject-path: release-assets/*
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@62c96d0c4e8a889135c1f3a25910db8dbe0e85f7
+        with:
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-rc.') }}
+          generate_release_notes: true
+          body: |
+            Native desktop builds for macOS, Windows, and Linux.
+
+            Assets containing `-unsigned` were built without platform signing
+            credentials and may trigger Gatekeeper or SmartScreen warnings.
+            Verify downloads against `SHA256SUMS`.
+          files: release-assets/*

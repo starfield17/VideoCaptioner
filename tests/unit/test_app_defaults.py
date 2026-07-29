@@ -19,6 +19,7 @@ class _Directories:
     user_config_dir = "/test/config"
     user_cache_dir = "/test/cache"
     user_log_dir = "/test/log"
+    user_data_dir = "/test/data"
 
 
 def test_application_paths_keep_models_out_of_shared_sdk_cache() -> None:
@@ -27,6 +28,7 @@ def test_application_paths_keep_models_out_of_shared_sdk_cache() -> None:
     assert paths.config_file == Path("/test/config/config.toml")
     assert paths.model_dir == Path("/test/cache/models")
     assert paths.log_dir == Path("/test/log")
+    assert paths.runtime_dir == Path("/test/data/runtimes")
 
 
 def test_built_in_default_is_quantized_turbo_on_auto_device() -> None:

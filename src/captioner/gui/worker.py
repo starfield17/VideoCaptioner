@@ -18,10 +18,22 @@ from captioner.workflow.api import (
     execute_refine,
     execute_run,
     execute_transcribe,
+    install_runtime,
     plan_operation,
+    remove_runtime,
 )
 
-JobKind = Literal["scan", "run", "transcribe", "refine", "doctor", "download"]
+JobKind = Literal[
+    "scan",
+    "run",
+    "transcribe",
+    "refine",
+    "doctor",
+    "download",
+    "runtime_install",
+    "runtime_repair",
+    "runtime_remove",
+]
 
 
 @dataclass(frozen=True)
@@ -36,6 +48,7 @@ class JobSpec:
     profile: AsrProfile | None = None
     load_model: bool = False
     model_key: str | None = None
+    runtime_provider: str | None = None
     scan_command: ApplicationCommand = "run"
 
 
@@ -79,6 +92,16 @@ class OperationWorker(QObject):
             if spec.model_key is None:
                 raise ValueError("download job requires model_key")
             return download_model(spec.options, spec.model_key, context=context)
+        if spec.kind in {"runtime_install", "runtime_repair", "runtime_remove"}:
+            if spec.runtime_provider is None:
+                raise ValueError(f"{spec.kind} job requires runtime_provider")
+            if spec.kind == "runtime_remove":
+                return remove_runtime(spec.runtime_provider)
+            return install_runtime(
+                spec.runtime_provider,
+                repair=spec.kind == "runtime_repair",
+                context=context,
+            )
         if spec.kind == "scan":
             if spec.input_path is None or spec.output_dir is None:
                 raise ValueError("scan job requires input and output")

@@ -8,7 +8,9 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from captioner.shared.app_paths import bundled_executable
 from captioner.shared.errors import CaptionerError
+from captioner.shared.runtimes import RuntimeStore
 from captioner.transcription.api import (
     FakeTranscriptionService,
     FasterWhisperConfig,
@@ -52,11 +54,11 @@ def run_doctor(
     """Check the selected provider without downloading a model by default."""
 
     selected_provider = provider or options.asr.provider
+    ffmpeg = bundled_executable("ffmpeg")
 
     checks = {
         "python_3_13": sys.version_info[:2] == (3, 13),
-        "conda": shutil.which("conda") is not None,
-        "ffmpeg": shutil.which("ffmpeg") is not None,
+        "ffmpeg": ffmpeg is not None,
         "output_directory": False,
         "gpu_cuda": True,
         "configuration": True,
@@ -64,11 +66,16 @@ def run_doctor(
     }
     details = {
         "python_3_13": sys.version.split()[0],
-        "conda": shutil.which("conda") or "not found",
-        "ffmpeg": shutil.which("ffmpeg") or "not found",
+        "conda": shutil.which("conda") or "not found; managed runtimes are supported",
+        "ffmpeg": ffmpeg or "not found",
         "configuration": "valid",
         "provider": selected_provider,
     }
+    if selected_provider != "fake":
+        runtime = RuntimeStore().status(selected_provider)
+        details["managed_runtime"] = (
+            str(runtime.path) if runtime.path is not None else runtime.detail
+        )
     selected_output = output_dir or Path.cwd()
     try:
         selected_output.mkdir(parents=True, exist_ok=True)

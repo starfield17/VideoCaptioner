@@ -23,6 +23,7 @@ class ProgressKind(StrEnum):
 class ProgressStage(StrEnum):
     CONFIGURATION = "configuration"
     MODEL_DOWNLOAD = "model_download"
+    RUNTIME_INSTALL = "runtime_install"
     PROVIDER = "provider"
     MEDIA = "media"
     VOICE_SEPARATION = "voice_separation"

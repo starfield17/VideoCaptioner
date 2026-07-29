@@ -295,10 +295,16 @@ class ModelsDialog(QDialog):
         actions = QHBoxLayout()
         self.refresh_button = QPushButton(tr("Refresh"))
         self.download_button = QPushButton(tr("Download selected"))
+        self.install_runtime_button = QPushButton(tr("Install runtime"))
+        self.repair_runtime_button = QPushButton(tr("Repair runtime"))
+        self.remove_runtime_button = QPushButton(tr("Remove runtime"))
         self.download_button.setObjectName("primary")
         actions.addStretch()
         actions.addWidget(self.refresh_button)
         actions.addWidget(self.download_button)
+        actions.addWidget(self.install_runtime_button)
+        actions.addWidget(self.repair_runtime_button)
+        actions.addWidget(self.remove_runtime_button)
         layout.addLayout(actions)
         self.setWindowTitle(tr("Models"))
 
@@ -306,6 +312,9 @@ class ModelsDialog(QDialog):
         self.setWindowTitle(tr("Models"))
         self.refresh_button.setText(tr("Refresh"))
         self.download_button.setText(tr("Download selected"))
+        self.install_runtime_button.setText(tr("Install runtime"))
+        self.repair_runtime_button.setText(tr("Repair runtime"))
+        self.remove_runtime_button.setText(tr("Remove runtime"))
         self.page.retranslate()
 
 

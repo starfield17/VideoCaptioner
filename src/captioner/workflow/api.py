@@ -4,6 +4,11 @@ from captioner.media.voice_separation import VoiceSeparationOptions
 from captioner.shared.app_paths import ApplicationPaths
 from captioner.shared.errors import OperationCancelled
 from captioner.shared.logging import LogLevel
+from captioner.shared.runtimes import (
+    RuntimeDescriptor,
+    RuntimeStability,
+    RuntimeStatus,
+)
 from captioner.subtitles.glossary import Glossary, GlossaryEntry
 from captioner.subtitles.quality import QualityOptions
 from captioner.workflow.application import (
@@ -16,8 +21,12 @@ from captioner.workflow.application import (
     execute_run,
     execute_transcribe,
     get_application_paths,
+    get_runtime_status,
+    install_runtime,
     list_models,
+    list_runtimes,
     plan_operation,
+    remove_runtime,
     resolve_options,
 )
 from captioner.workflow.doctor import DoctorReport, run_doctor
@@ -112,6 +121,9 @@ __all__ = [
     "Qwen3AsrOptions",
     "RefineResult",
     "RepairOptions",
+    "RuntimeDescriptor",
+    "RuntimeStability",
+    "RuntimeStatus",
     "RunOptions",
     "RunResult",
     "SegmentationOptions",
@@ -129,12 +141,16 @@ __all__ = [
     "execute_run",
     "execute_transcribe",
     "get_application_paths",
+    "get_runtime_status",
+    "install_runtime",
     "list_models",
+    "list_runtimes",
     "load_options",
     "plan_operation",
     "prepare_asr_model",
     "process_media",
     "refine_srt",
+    "remove_runtime",
     "render_options_toml",
     "resolve_options",
     "run_doctor",

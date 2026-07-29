@@ -6,6 +6,9 @@ build-backend = "setuptools.build_meta"
 name = "captioner"
 version = "0.1.0"
 description = "Synchronous ASR and LLM subtitle production pipeline"
+readme = "README.md"
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
 requires-python = ">=3.13,<3.14"
 dependencies = [
     "huggingface-hub>=0.34,<2",
@@ -28,7 +31,9 @@ captioner = "captioner.cli.main:main"
 captioner-gui = "captioner.gui.main:main"
 
 [tool.setuptools.packages.find]
-where = ["src"]
+where = ["src", "."]
+include = ["captioner*", "workers*"]
+exclude = ["tests*"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src", "."]

@@ -39,8 +39,10 @@ from captioner.workflow.api import (
     ProgressEvent,
     ProgressKind,
     ProgressStage,
+    RuntimeStatus,
     get_application_paths,
     list_models,
+    list_runtimes,
     with_asr_profile,
 )
 
@@ -724,13 +726,16 @@ class ModelsPage(QWidget):
     def __init__(self) -> None:
         super().__init__()
         layout = QVBoxLayout(self)
+        self.tabs = QTabWidget()
+        models_panel = QWidget()
+        models_layout = QVBoxLayout(models_panel)
         top = QHBoxLayout()
         self.path_caption = QLabel()
         self.path_value = QLabel()
         self.path_value.setObjectName("muted")
         top.addWidget(self.path_caption)
         top.addWidget(self.path_value, 1)
-        layout.addLayout(top)
+        models_layout.addLayout(top)
         self.table = QTableWidget(0, 5)
         self.table.horizontalHeader().setSectionResizeMode(
             QHeaderView.ResizeMode.ResizeToContents
@@ -739,7 +744,31 @@ class ModelsPage(QWidget):
             4, QHeaderView.ResizeMode.Stretch
         )
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        layout.addWidget(self.table)
+        models_layout.addWidget(self.table)
+        self.tabs.addTab(models_panel, "")
+
+        runtimes_panel = QWidget()
+        runtimes_layout = QVBoxLayout(runtimes_panel)
+        runtime_top = QHBoxLayout()
+        self.runtime_path_caption = QLabel()
+        self.runtime_path_value = QLabel()
+        self.runtime_path_value.setObjectName("muted")
+        runtime_top.addWidget(self.runtime_path_caption)
+        runtime_top.addWidget(self.runtime_path_value, 1)
+        runtimes_layout.addLayout(runtime_top)
+        self.runtime_table = QTableWidget(0, 6)
+        self.runtime_table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeMode.ResizeToContents
+        )
+        self.runtime_table.horizontalHeader().setSectionResizeMode(
+            5, QHeaderView.ResizeMode.Stretch
+        )
+        self.runtime_table.setSelectionBehavior(
+            QTableWidget.SelectionBehavior.SelectRows
+        )
+        runtimes_layout.addWidget(self.runtime_table)
+        self.tabs.addTab(runtimes_panel, "")
+        layout.addWidget(self.tabs)
         self.retranslate()
 
     def retranslate(self) -> None:
@@ -747,6 +776,19 @@ class ModelsPage(QWidget):
         self.table.setHorizontalHeaderLabels(
             (tr("Key"), tr("Provider"), tr("Installed"), tr("Location"), tr("Notes"))
         )
+        self.runtime_path_caption.setText(f"{tr('Runtime directory')}:")
+        self.runtime_table.setHorizontalHeaderLabels(
+            (
+                tr("Provider"),
+                tr("Status"),
+                tr("Stability"),
+                tr("Process architecture"),
+                tr("Location"),
+                tr("Detail"),
+            )
+        )
+        self.tabs.setTabText(0, tr("Models"))
+        self.tabs.setTabText(1, tr("Runtimes"))
 
     def refresh(self, options: PipelineOptions) -> None:
         models = list_models(options)
@@ -755,6 +797,10 @@ class ModelsPage(QWidget):
         self.table.setRowCount(0)
         for model in models:
             self._add(model)
+        self.runtime_path_value.setText(str(get_application_paths().runtime_dir))
+        self.runtime_table.setRowCount(0)
+        for runtime in list_runtimes():
+            self._add_runtime(runtime)
 
     def selected_key(self) -> str | None:
         row = self.table.currentRow()
@@ -762,6 +808,14 @@ class ModelsPage(QWidget):
             return None
         item = self.table.item(row, 0)
         return str(item.data(Qt.ItemDataRole.UserRole)) if item else None
+
+    def selected_runtime(self) -> RuntimeStatus | None:
+        row = self.runtime_table.currentRow()
+        if row < 0:
+            return None
+        item = self.runtime_table.item(row, 0)
+        value = item.data(Qt.ItemDataRole.UserRole) if item else None
+        return value if isinstance(value, RuntimeStatus) else None
 
     def _add(self, model: ModelStatus) -> None:
         row = self.table.rowCount()
@@ -777,6 +831,31 @@ class ModelsPage(QWidget):
             row, 3, QTableWidgetItem(str(model.path) if model.path else "")
         )
         self.table.setItem(row, 4, QTableWidgetItem(model.note))
+
+    def _add_runtime(self, runtime: RuntimeStatus) -> None:
+        row = self.runtime_table.rowCount()
+        self.runtime_table.insertRow(row)
+        provider = QTableWidgetItem(runtime.descriptor.provider)
+        provider.setData(Qt.ItemDataRole.UserRole, runtime)
+        self.runtime_table.setItem(row, 0, provider)
+        status = (
+            tr("Installed")
+            if runtime.installed
+            else tr("Available")
+            if runtime.descriptor.available
+            else tr("Unavailable")
+        )
+        self.runtime_table.setItem(row, 1, QTableWidgetItem(status))
+        self.runtime_table.setItem(
+            row, 2, QTableWidgetItem(runtime.descriptor.stability.value)
+        )
+        self.runtime_table.setItem(
+            row, 3, QTableWidgetItem(runtime.descriptor.process_arch)
+        )
+        self.runtime_table.setItem(
+            row, 4, QTableWidgetItem(str(runtime.path) if runtime.path else "")
+        )
+        self.runtime_table.setItem(row, 5, QTableWidgetItem(runtime.detail))
 
 
 class DiagnosticsPage(QWidget):

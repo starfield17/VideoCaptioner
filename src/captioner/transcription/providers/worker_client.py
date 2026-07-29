@@ -238,8 +238,13 @@ class FakeWorkerClient:
 
     def _get_client(self) -> NdjsonWorkerClient:
         if self._client is None:
+            command = (sys.executable, "-m", "workers.fake")
+            if getattr(sys, "frozen", False):
+                suffix = ".exe" if sys.platform == "win32" else ""
+                worker = Path(sys.executable).parent / f"captioner-worker-fake{suffix}"
+                command = (str(worker),)
             self._client = NdjsonWorkerClient(
-                command=(sys.executable, "-m", "workers.fake"),
+                command=command,
                 expected_provider_id="fake",
             )
         return self._client

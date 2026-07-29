@@ -13,6 +13,7 @@ from captioner.cli import (
     models_command,
     pipeline_command,
     refine_command,
+    runtimes_command,
 )
 from captioner.cli.progress import render_progress
 from captioner.shared.errors import (
@@ -80,6 +81,8 @@ def _dispatch(arguments: argparse.Namespace, context: ExecutionContext) -> int:
         return config_command.run(arguments)
     if arguments.command == "models":
         return models_command.run(arguments, context)
+    if arguments.command == "runtimes":
+        return runtimes_command.run(arguments, context)
     if arguments.command == "doctor":
         return doctor_command.run(arguments, context)
     if arguments.command == "transcribe":
@@ -110,6 +113,8 @@ def _build_parser() -> argparse.ArgumentParser:
     config_command.add_arguments(config)
     models = commands.add_parser("models", help="inspect or download ASR models")
     models_command.add_arguments(models)
+    runtimes = commands.add_parser("runtimes", help="inspect or manage ASR runtimes")
+    runtimes_command.add_arguments(runtimes)
     return parser
 
 
